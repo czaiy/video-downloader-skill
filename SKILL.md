@@ -159,6 +159,10 @@ python -c "import glob,os,tempfile;[os.remove(f) for f in glob.glob(os.path.join
 python "<本skill目录>\scripts\kuaishou.py" "分享文本或链接" $env:TEMP
 ```
 
+> 本机实际命令（`<本skill目录>` = 本 SKILL.md 所在目录）：
+> `python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scripts\kuaishou.py" "链接" $env:TEMP`
+> **不要自己 curl/requests 探测快手短链**——桌面 UA 会被分流到 PC 页面导致解析失败，脚本内部已用移动端 UA 处理。
+
 脚本输出 `Author:`、`Desc:` 及 `VIDEO:`/`IMG_1:` 文件路径。**拿到路径后按「抖音兜底」小节的 4 步后处理流程执行**（长路径规范化 → 动图转 mp4 → send_message_to_user 发文件组件 → 清理）。
 
 ## 抖音图文/视频兜底（yt-dlp 失败或仍有水印时）
