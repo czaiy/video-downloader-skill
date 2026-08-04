@@ -8,7 +8,8 @@
 ## 支持平台
 
 抖音、TikTok、YouTube、Bilibili、快手、小红书、微博、Twitter/X、Instagram 等 1000+ 站点。
-针对抖音图文/笔记类内容附带专用解析脚本 `scripts/douyin_note.py` 作为兜底。
+内置 SKILL.md 附「平台策略速查表」：抖音走 yt-dlp + `scripts/douyin_note.py` 兜底；
+**快手 yt-dlp 无提取器，由专用脚本 `scripts/kuaishou.py` 直接解析**（移动端分享页 `INIT_STATE` → 无水印 CDN 直链）；小红书走 yt-dlp XiaoHongShu 提取器。
 
 ## 安装
 
@@ -18,7 +19,8 @@
    AstrBot/data/skills/video-downloader/
    ├── SKILL.md
    └── scripts/
-       └── douyin_note.py
+       ├── douyin_note.py
+       └── kuaishou.py
    ```
 
 2. 安装依赖：
@@ -37,7 +39,7 @@
 - 支持纯音频提取
 - **发送完成后自动删除本地临时文件**，不留存任何下载副本
 - 严格的执行约束：最多 6 次工具调用、失败即止，避免无意义重试
-- 内置平台话术风格指引，回复自然活泼
+- 内置平台话术风格指引，回复自然活泼；结尾自动附一句作品评论，禁止机械复读"无水印版"
 
 ## 环境说明
 

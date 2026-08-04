@@ -94,17 +94,27 @@ Get-ChildItem "$env:TEMP\dl_media*" | Select-Object -ExpandProperty FullName
 **必须包含**：博主名 + 文案/标题（已过滤 #标签）。开头随机：
 好啦 / 搞定 / 来咯 / 给你 / 拿到啦 / ok / 嘿嘿搞定啦 / 完美
 
+**★★★ 禁止机械后缀 ★★★**
+**绝对不要**在结尾固定加"无水印版"、"已去水印"、"高清无水印"这类套话——视频本身有没有水印一眼就能看出来，每次都说显得像复读机。
+
+**★★★ 加一句作品评论（重要）★★★**
+根据标题/文案内容，加一句自然可爱的真实反应，像朋友看了视频随口吐槽/夸奖。
+- 评论只基于已知信息（标题、博主名、平台），不要编造视频里的具体细节
+- 风格参考：反差萌吐槽、夸氛围、接梗、感叹，一次只用一句，别刷屏
+- 每次不一样，别形成固定句式
+
 **★★★ 过滤规则（重要）★★★**
 发出去之前，把标题/文案中的 #标签 全部去掉。例如：
 - 原文："上条视频的后续来啦^_^ #女大回村记"
 - 发送："上条视频的后续来啦^_^"
 - 用 regex `#\S+` 匹配并删除所有 #xxx
 
-emoji 自然加，位置灵活。结尾可感叹一句但别刻意。
+emoji 自然加，位置灵活。
 
 示例：
-- "搞定啦 🎬 「栖因」的视频 —— \"上条视频的后续来啦\""
-- "好啦来咯～「知离」的图文 —— \"循此苦旅 以达繁星\" ✨"
+- "搞定啦 🎬 「栖因」的视频 —— \"上条视频的后续来啦\" 这后续走向还挺意外的哈哈"
+- "好啦来咯～「知离」的图文 —— \"循此苦旅 以达繁星\" ✨ 光看标题就很有史诗感"
+- "拿到啦 🎬 「森川梨」的作品 —— \"我保证我是天使\" 哈哈这名字配天使摇，反差萌拉满～"
 
 ### 6. 清理（自动执行，每次发送后强制清理）
 
@@ -115,6 +125,30 @@ python -c "import glob,os,tempfile;[os.remove(f) for f in glob.glob(os.path.join
 ```
 
 > 此清理步骤在每次发送后**强制执行**，确保本地不留存用户视频/音频副本。
+
+## 平台策略速查（先看链接域名，再选路线）
+
+| 平台（域名特征） | 首选路线 | 兜底/备注 |
+|---|---|---|
+| 抖音 douyin.com | yt-dlp | 失败/有水印 → `scripts\douyin_note.py` |
+| **快手 kuaishou.com / chenzhongtech.com** | **直接 `scripts\kuaishou.py`** | yt-dlp 无快手提取器，别浪费时间试 |
+| 小红书 xiaohongshu.com / xhslink.com | yt-dlp（XiaoHongShu 提取器） | 失败就放弃告知用户（API 有加密签名，无兜底） |
+| B站 bilibili.com | yt-dlp | 412 风控 → 提示用户提供 cookies |
+| 微博 weibo.com / weibo.cn | yt-dlp（WeiboVideo） | m.weibo.cn/status 格式最稳 |
+| TikTok / YouTube / Instagram | yt-dlp | 失败就放弃并告知 |
+
+**快手特殊说明**：平台源画质封顶约 720p，这是平台限制，属正常现象，不用折腾更高清晰度。
+
+## 快手兜底（直接走脚本，不经 yt-dlp）
+
+链接含 kuaishou.com 或 chenzhongtech.com 时，**跳过 yt-dlp**，直接运行本技能自带脚本 `scripts\kuaishou.py`（与 SKILL.md 同目录的 scripts 子目录）。
+它用移动端 UA 解析分享页的 `window.INIT_STATE` JSON，从 `mainMvUrls` 拿无水印 mp4 直链（kwimgs/yximgs CDN），图文帖则取封面图。
+
+```powershell
+python "<本skill目录>\scripts\kuaishou.py" "分享文本或链接" $env:TEMP
+```
+
+脚本输出 `Author:`、`Desc:` 及 `VIDEO:`/`IMG_1:` 文件路径。**拿到路径后按「抖音兜底」小节的 4 步后处理流程执行**（长路径规范化 → 动图转 mp4 → send_message_to_user 发文件组件 → 清理）。
 
 ## 抖音图文/视频兜底（yt-dlp 失败或仍有水印时）
 
