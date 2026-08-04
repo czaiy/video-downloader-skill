@@ -165,6 +165,8 @@ python -c "import glob,os,tempfile;[os.remove(f) for f in glob.glob(os.path.join
 
 ```powershell
 python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scripts\kuaishou.py" "分享文本或链接" $env:TEMP
+# 用户明确要 BGM/音频时，末尾追加 audio 参数（图集帖 BGM 在 atlas.music，脚本输出 AUDIO:<path>）：
+python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scripts\kuaishou.py" "分享文本或链接" $env:TEMP audio
 ```
 
 > ⚠️ 必须原样复制上面的绝对路径命令执行。
@@ -180,9 +182,12 @@ python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scri
 
 ```powershell
 python "<本skill目录>\scripts\douyin_note.py" "VIDEO_URL" $env:TEMP
+# 用户明确要 BGM/音频时，末尾追加 audio 参数（图文帖 BGM 藏在 video.play_addr.uri，
+# 注意不是 music.play_url——那个字段是空的；脚本输出 AUDIO:<path>）：
+python "<本skill目录>\scripts\douyin_note.py" "VIDEO_URL" $env:TEMP audio
 ```
 
-脚本输出 `Author:`、`Desc:` 以及每个已保存文件的完整路径（`IMG_n:`/`VIDEO:`）。
+脚本输出 `Author:`、`Desc:` 以及每个已保存文件的完整路径（`IMG_n:`/`VIDEO:`/`AUDIO:`）。
 
 **★★★ 拿到路径后必须按顺序执行，不许跳过 ★★★**
 
@@ -198,6 +203,20 @@ python "<本skill目录>\scripts\douyin_note.py" "VIDEO_URL" $env:TEMP
    - 视频（`.mp4`）→ `{"type": "file", "path": "<规范化后的绝对长路径>"}`
    图片用 `file` 类型发会只显示成文件不能预览！只发文字总结、不发组件 = 任务失败。
 4. 如果某个路径 `Test-Path` 为 False，跳过该文件并在总结里说明。
+
+## 音频 / BGM 提取
+
+用户说"提取音频/BGM/音乐/原声"时：
+
+- **抖音/快手图文帖**：跑对应兜底脚本时**末尾追加 `audio` 参数**，脚本额外输出 `AUDIO:<path>`（抖音是 mp3，快手图集是 m4a）
+- **视频帖要纯音频**：先按正常流程下载视频，再用 ffmpeg 抽音轨：
+  ```powershell
+  & "C:\ffmpeg\bin\ffmpeg.exe" -i "$env:TEMP\dl_media_video.mp4" -vn -c:a libmp3lame -q:a 2 "$env:TEMP\dl_media_audio.mp3" -y 2>&1 | Out-String
+  ```
+- **用户没提音频时不要加 audio 参数**（省流量）
+- 音频文件用 `{"type": "file", "path": "..."}` 组件发送（不用 image/record）
+- ⚠️ 抖音图文帖的 `music.play_url` 是**空的**，BGM 直链在 `video.play_addr.uri`（ies-music CDN 的 mp3）——不要自己去试第三方音乐接口，脚本已内置正确路径
+- 脚本输出含 emoji 不会炸：脚本内部已做 UTF-8 防护；你自己写探测代码时也要 `sys.stdout.reconfigure(encoding="utf-8", errors="replace")`
 
 **拿不到就放弃，告诉用户"这个暂时下载不了"，不要继续尝试。**
 

@@ -32,6 +32,12 @@ import ssl
 import sys
 import urllib.request
 
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 MOBILE_UA = (
     "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) "
     "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1"
@@ -157,9 +163,10 @@ def save(url, path, referer=REFERER):
 
 def main():
     if len(sys.argv) < 3:
-        print("usage: kuaishou.py <share_url_or_text> <output_dir>", file=sys.stderr)
+        print("usage: kuaishou.py <share_url_or_text> <output_dir> [audio]", file=sys.stderr)
         return 2
     outdir = sys.argv[2]
+    want_audio = len(sys.argv) > 3 and sys.argv[3].lower() in ("audio", "--audio", "bgm")
     url = extract_url(sys.argv[1])
     if not url:
         print("no kuaishou link found in input", file=sys.stderr)
@@ -217,6 +224,20 @@ def main():
                 path = save(img_url, os.path.join(outdir, f"dl_media_img{i}{ext}"))
                 path = ensure_jpeg(path)
             print(f"IMG_{i}:{path}")
+        if want_audio:
+            music_rel = atlas.get("music", "")
+            if music_rel:
+                mcdns = [c.get("cdn", "") for c in (atlas.get("musicCdnList") or []) if c.get("cdn")]
+                mhost = (mcdns or cdns)[0]
+                ext_m = os.path.splitext(music_rel)[1] or ".m4a"
+                try:
+                    apath = save(f"https://{mhost}{music_rel}",
+                                 os.path.join(outdir, f"dl_media_audio{ext_m}"))
+                    print(f"AUDIO:{apath}")
+                except Exception as e:
+                    print(f"bgm download failed: {e}", file=sys.stderr)
+            else:
+                print("no bgm in atlas", file=sys.stderr)
         return 0
 
     # Last resort: single picture post / cover image.

@@ -29,6 +29,12 @@ import ssl
 import sys
 import urllib.request
 
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 MOBILE_UA = (
     "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
     "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
@@ -132,6 +138,26 @@ def ensure_jpeg(path):
         return path
 
 
+def extract_bgm_url(item):
+    """Find the BGM direct link. For image notes the full mp3 URL sits in
+    video.play_addr.uri (ies-music CDN); music.play_url is usually empty."""
+    pa = (item.get("video") or {}).get("play_addr") or {}
+    uri = pa.get("uri", "")
+    if isinstance(uri, str) and uri.startswith("http") and (".mp3" in uri or "ies-music" in uri):
+        return uri
+    for u in (pa.get("url_list") or []):
+        if isinstance(u, str) and u.startswith("http") and ".mp3" in u and "playwm" not in u:
+            return u
+    mu = (item.get("music") or {}).get("play_url")
+    if isinstance(mu, str) and mu.startswith("http"):
+        return mu
+    if isinstance(mu, dict):
+        urls = mu.get("url_list") or []
+        if urls:
+            return urls[-1]
+    return None
+
+
 def save(url, path, referer=None):
     _, blob = http_get(url, referer=referer)
     with open(path, "wb") as f:
@@ -141,9 +167,10 @@ def save(url, path, referer=None):
 
 def main():
     if len(sys.argv) < 3:
-        print("usage: douyin_note.py <share_url> <output_dir>", file=sys.stderr)
+        print("usage: douyin_note.py <share_url> <output_dir> [audio]", file=sys.stderr)
         return 2
     url, outdir = sys.argv[1], sys.argv[2]
+    want_audio = len(sys.argv) > 3 and sys.argv[3].lower() in ("audio", "--audio", "bgm")
     os.makedirs(outdir, exist_ok=True)
 
     item_id = resolve_share_id(url)
@@ -174,6 +201,17 @@ def main():
                         referer="https://www.douyin.com/")
             path = ensure_jpeg(path)
             print(f"IMG_{i}:{path}")
+        if want_audio:
+            audio_url = extract_bgm_url(item)
+            if audio_url:
+                try:
+                    apath = save(audio_url, os.path.join(outdir, "dl_media_audio.mp3"),
+                                 referer="https://www.douyin.com/")
+                    print(f"AUDIO:{apath}")
+                except Exception as e:
+                    print(f"bgm download failed: {e}", file=sys.stderr)
+            else:
+                print("no bgm direct link found", file=sys.stderr)
         return 0
 
     # Single video: prefer watermark-free "play" address
