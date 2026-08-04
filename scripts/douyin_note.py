@@ -138,6 +138,12 @@ def ensure_jpeg(path):
         return path
 
 
+def jpeg_variant(url):
+    """Douyin tplv CDN serves the same signed asset as jpeg when the
+    extension is swapped (e.g. :q80.webp -> :q80.jpeg)."""
+    return re.sub(r"(:q\d+)\.webp(?=\?|$)", r"\1.jpeg", url)
+
+
 def extract_bgm_url(item):
     """Find the BGM direct link. For image notes the full mp3 URL sits in
     video.play_addr.uri (ies-music CDN); music.play_url is usually empty."""
@@ -196,10 +202,19 @@ def main():
             if not urls:
                 continue
             img_url = urls[-1]
-            ext = ".jpeg" if ".jpeg" in img_url or ".jpg" in img_url else ".webp"
-            path = save(img_url, os.path.join(outdir, f"dl_media_img{i}{ext}"),
-                        referer="https://www.douyin.com/")
-            path = ensure_jpeg(path)
+            jpeg_url = jpeg_variant(img_url)
+            path = None
+            if jpeg_url != img_url:
+                try:
+                    path = save(jpeg_url, os.path.join(outdir, f"dl_media_img{i}.jpeg"),
+                                referer="https://www.douyin.com/")
+                except Exception:
+                    path = None
+            if not path:
+                ext = ".jpeg" if ".jpeg" in img_url or ".jpg" in img_url else ".webp"
+                path = save(img_url, os.path.join(outdir, f"dl_media_img{i}{ext}"),
+                            referer="https://www.douyin.com/")
+                path = ensure_jpeg(path)
             print(f"IMG_{i}:{path}")
         if want_audio:
             audio_url = extract_bgm_url(item)

@@ -218,6 +218,22 @@ python "<本skill目录>\scripts\douyin_note.py" "VIDEO_URL" $env:TEMP audio
 - ⚠️ 抖音图文帖的 `music.play_url` 是**空的**，BGM 直链在 `video.play_addr.uri`（ies-music CDN 的 mp3）——不要自己去试第三方音乐接口，脚本已内置正确路径
 - 脚本输出含 emoji 不会炸：脚本内部已做 UTF-8 防护；你自己写探测代码时也要 `sys.stdout.reconfigure(encoding="utf-8", errors="replace")`
 
+## SnapAny 云端解析兜底（付费，1 credit/次）
+
+本地脚本拿不到的媒体走 SnapAny（iiilab 引擎，服务端解析）。**典型场景：抖音图文帖的"动图/live 实况视频"**——分享页只有静态帧，SnapAny 能返回完整的 `douyinvod.com` mp4 直链（实测花火帖 11 秒动图原片）。
+
+```powershell
+# types 参数可选：video,image,audio 逗号分隔过滤（缺省全要）
+python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scripts\snapany.py" "链接或分享文本" $env:TEMP
+python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scripts\snapany.py" "链接或分享文本" $env:TEMP video
+```
+
+- 输出与其他脚本对齐：`Text:`/`VIDEO:`/`IMG_n:`/`AUDIO:`
+- key 在 skill 目录 `config.json`（已加入 .gitignore，**禁止提交**）；报错 `snapany_key missing` 就提示用户补 key
+- **优先级规则**：本地脚本（douyin_note/kuaishou）永远优先（免费）；只有①本地拿不到用户要的媒体（如动图视频）②或用户明确要"原片/live/实况"时才用 snapany
+- 每次成功调用消耗 1 credit，调用前无需请示但要在总结里说明消耗；失败（api error）不扣费
+- 视频直链带时效签名，**拿到后立即在同一轮下载**，不要缓存 URL
+
 **拿不到就放弃，告诉用户"这个暂时下载不了"，不要继续尝试。**
 
 ## 错误处理
