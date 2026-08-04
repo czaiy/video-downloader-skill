@@ -81,14 +81,14 @@ def fetch_init_state(url):
 
 
 def find_photo(data):
-    """Recursively locate the dict that carries mainMvUrls."""
+    """Recursively locate the photo object (video or atlas/image post)."""
     found = {}
 
     def walk(d):
         if "photo" in found:
             return
         if isinstance(d, dict):
-            if "mainMvUrls" in d and d.get("mainMvUrls"):
+            if "photoId" in d and "userName" in d:
                 found["photo"] = d
                 return
             for v in d.values():
@@ -157,7 +157,26 @@ def main():
             print(f"VIDEO:{path}")
             return 0
 
-    # Picture post fallback: use the first cover image.
+    # Atlas / image post: images live in ext_params.atlas (relative paths
+    # under /ufile/atlas/, to be prefixed with one of the CDN hosts).
+    atlas = (photo.get("ext_params") or {}).get("atlas") or {}
+    img_list = atlas.get("list") or []
+    if img_list:
+        cdns = [c.get("cdn", "") for c in (atlas.get("cdnList") or []) if c.get("cdn")]
+        if not cdns:
+            cdns = [c for c in (atlas.get("cdn") or []) if isinstance(c, str) and c]
+        if not cdns:
+            print("atlas images found but no CDN host", file=sys.stderr)
+            return 1
+        host = cdns[0]
+        for i, rel in enumerate(img_list, 1):
+            ext = os.path.splitext(rel)[1] or ".webp"
+            img_url = f"https://{host}{rel}"
+            path = save(img_url, os.path.join(outdir, f"dl_media_img{i}{ext}"))
+            print(f"IMG_{i}:{path}")
+        return 0
+
+    # Last resort: single picture post / cover image.
     covers = photo.get("coverUrls") or []
     if covers:
         img_url = covers[0].get("url", "")

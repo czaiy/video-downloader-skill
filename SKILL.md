@@ -152,18 +152,21 @@ python -c "import glob,os,tempfile;[os.remove(f) for f in glob.glob(os.path.join
 
 ## 快手兜底（直接走脚本，不经 yt-dlp）
 
-链接含 kuaishou.com 或 chenzhongtech.com 时，**跳过 yt-dlp**，直接运行本技能自带脚本 `scripts\kuaishou.py`（与 SKILL.md 同目录的 scripts 子目录）。
-它用移动端 UA 解析分享页的 `window.INIT_STATE` JSON，从 `mainMvUrls` 拿无水印 mp4 直链（kwimgs/yximgs CDN），图文帖则取封面图。
+链接含 kuaishou.com 或 chenzhongtech.com 时，**跳过 yt-dlp**（yt-dlp 无快手提取器，必失败），直接运行本技能自带脚本 `scripts\kuaishou.py`。
+它用移动端 UA 解析分享页的 `window.INIT_STATE` JSON：
+
+- **视频帖**：从 `mainMvUrls` 拿无水印 mp4 直链（kwimgs/yximgs CDN，源画质封顶约 720p）
+- **图文帖（图集）**：图片藏在 `ext_params.atlas`，脚本自动拼接 CDN 域名逐张下载原图（1080p+ webp）
+- **单图帖**：coverUrls 兜底
 
 ```powershell
-python "<本skill目录>\scripts\kuaishou.py" "分享文本或链接" $env:TEMP
+python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scripts\kuaishou.py" "分享文本或链接" $env:TEMP
 ```
 
-> 本机实际命令（`<本skill目录>` = 本 SKILL.md 所在目录）：
-> `python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scripts\kuaishou.py" "链接" $env:TEMP`
+> ⚠️ 必须原样复制上面的绝对路径命令执行。
 > **不要自己 curl/requests 探测快手短链**——桌面 UA 会被分流到 PC 页面导致解析失败，脚本内部已用移动端 UA 处理。
 
-脚本输出 `Author:`、`Desc:` 及 `VIDEO:`/`IMG_1:` 文件路径。**拿到路径后按「抖音兜底」小节的 4 步后处理流程执行**（长路径规范化 → 动图转 mp4 → send_message_to_user 发文件组件 → 清理）。
+脚本输出 `Author:`、`Desc:` 及 `VIDEO:<path>`（视频）或多行 `IMG_n:<path>`（图文帖，每张图一行）。**拿到路径后按「抖音兜底」小节的 4 步后处理流程执行**（长路径规范化 → 动图转 mp4 → send_message_to_user 发文件组件，多张图就发多个组件 → 清理）。
 
 ## 抖音图文/视频兜底（yt-dlp 失败或仍有水印时）
 
