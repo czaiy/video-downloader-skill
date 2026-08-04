@@ -131,15 +131,19 @@ emoji 自然加，位置灵活。
 - "好啦来咯～「知离」的图文 —— \"循此苦旅 以达繁星\" ✨ 光看标题就很有史诗感"
 - "拿到啦 🎬 「森川梨」的作品 —— \"我保证我是天使\" 哈哈这名字配天使摇，反差萌拉满～"
 
-### 6. 清理（自动执行，每次发送后强制清理）
+### 6. 清理（⚠️ 不能立刻执行，必须等上传完成）
 
-发送完成后，**自动删除本地临时文件**，不保留任何下载副本：
+> **竞态修复**：`send_message_to_user` 调用返回只代表"入队"，后台还在读文件上传到微信。长视频上传要数十秒，**必须等够时间再删**，否则上传读到一半文件已被清理 → 发送失败。
+
+**清理前必须 sleep，时长按文件大小估算**（微信桥接器约 3MB/s 上行，留 2× 余量 + 最少 5 秒）：
 
 ```powershell
-python -c "import glob,os,tempfile;[os.remove(f) for f in glob.glob(os.path.join(tempfile.gettempdir(),'dl_media*'))]"
+# 先看要删的文件总大小（MB），再 sleep 足够时间
+$totalMB = (Get-ChildItem "$env:TEMP\dl_media*" | Measure-Object Length -Sum).Sum / 1MB; $wait = [Math]::Max(5, [Math]::Ceiling($totalMB / 1.5)); Write-Host "total ${totalMB}MB, waiting ${wait}s for upload to finish..."; Start-Sleep -Seconds $wait; python -c "import glob,os,tempfile;[os.remove(f) for f in glob.glob(os.path.join(tempfile.gettempdir(),'dl_media*'))];print('cleaned')"
 ```
 
-> 此清理步骤在每次发送后**强制执行**，确保本地不留存用户视频/音频副本。
+> **为什么**：send_message_to_user 立刻返回 ≠ 微信发完。小文件（几 MB）几秒传完；长视频（几十~几百 MB）要传很久。sleep 等上传跑完再清临时文件，就不会炸。
+> **严禁**：把清理命令紧挨在 send_message_to_user 后面写（PS `;` 连接也不行），必须通过 Start-Sleep 留出上传时间窗口。
 
 ## 平台策略速查（先看链接域名，再选路线）
 
