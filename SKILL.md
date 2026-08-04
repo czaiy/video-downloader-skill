@@ -228,11 +228,27 @@ python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scri
 python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scripts\snapany.py" "链接或分享文本" $env:TEMP video
 ```
 
+### Hellotik（免费，动图视频首选）
+
+**免费，但 ticket 接口 10 分钟/IP 限速**。解析机制：每周轮换的 WebCrypto AES-GCM 加密请求 + AES-CBC 响应解密（逆向见脚本注释）。返回结构含 title/type/cover/videos[]/pics[]。
+
+```powershell
+# 动图/live 视频首选
+python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scripts\hellotik.py" "链接" $env:TEMP video
+# 限速时（stderr 提示 rate limited）降级用 snapany
+```
+
+- 输出与其他脚本对齐：`Text:`/`VIDEO:`/`IMG_n:`/`AUDIO:`
+- 依赖：`pip install pycryptodome`（或 cryptography）；缺库时报错提示安装
+- 每次运行会重新抓取动态配置（profile 每周轮换），**不要缓存旧 chunk**
+- ⚠️ 限速策略：同一 IP 约 10 分钟一次 ticket；限速时返回特定错误，调用方应自动降级到 snapany
+
 - 输出与其他脚本对齐：`Text:`/`VIDEO:`/`IMG_n:`/`AUDIO:`
 - key 在 skill 目录 `config.json`（已加入 .gitignore，**禁止提交**）；报错 `snapany_key missing` 就提示用户补 key
 - **优先级规则**：本地脚本（douyin_note/kuaishou）永远优先（免费）；只有①本地拿不到用户要的媒体（如动图视频）②或用户明确要"原片/live/实况"时才用 snapany
 - 每次成功调用消耗 1 credit，调用前无需请示但要在总结里说明消耗；失败（api error）不扣费
 - 视频直链带时效签名，**拿到后立即在同一轮下载**，不要缓存 URL
+- 集成策略调整（2026-08-05）：新增 hellotik.py 免费兜底；**动图/live 视频优先走 Hellotik（免费、10分钟限速），Hellotik 限速时降级 SnapAny（付费）**；图片/BGM 仍用本地脚本
 
 **拿不到就放弃，告诉用户"这个暂时下载不了"，不要继续尝试。**
 
