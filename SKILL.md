@@ -160,7 +160,7 @@ python -c "import glob,os,tempfile;[os.remove(f) for f in glob.glob(os.path.join
 它用移动端 UA 解析分享页的 `window.INIT_STATE` JSON：
 
 - **视频帖**：从 `mainMvUrls` 拿无水印 mp4 直链（kwimgs/yximgs CDN，源画质封顶约 720p）
-- **图文帖（图集）**：图片藏在 `ext_params.atlas`，脚本自动拼接 CDN 域名逐张下载原图（1080p+ webp）
+- **图文帖（图集）**：图片藏在 `ext_params.atlas`；快手 CDN 同路径支持 `.jpg` 直连，脚本优先直下 jpg 原图（1080p+，微信可直接预览），失败才 webp→jpeg 转换
 - **单图帖**：coverUrls 兜底
 
 ```powershell

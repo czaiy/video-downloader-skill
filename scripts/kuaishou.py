@@ -204,8 +204,18 @@ def main():
         for i, rel in enumerate(img_list, 1):
             ext = os.path.splitext(rel)[1] or ".webp"
             img_url = f"https://{host}{rel}"
-            path = save(img_url, os.path.join(outdir, f"dl_media_img{i}{ext}"))
-            path = ensure_jpeg(path)
+            if ext.lower() == ".webp":
+                # Kuaishou CDN serves the same atlas image as JPEG with the
+                # same path — prefer it (smaller, WeChat-friendly, no convert).
+                jpg_url = img_url[:-5] + ".jpg"
+                try:
+                    path = save(jpg_url, os.path.join(outdir, f"dl_media_img{i}.jpg"))
+                except Exception:
+                    path = save(img_url, os.path.join(outdir, f"dl_media_img{i}{ext}"))
+                    path = ensure_jpeg(path)
+            else:
+                path = save(img_url, os.path.join(outdir, f"dl_media_img{i}{ext}"))
+                path = ensure_jpeg(path)
             print(f"IMG_{i}:{path}")
         return 0
 
