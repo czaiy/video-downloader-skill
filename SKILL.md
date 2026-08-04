@@ -32,6 +32,15 @@ python -m yt_dlp --version; & "C:\ffmpeg\bin\ffmpeg.exe" -version | Select-Objec
 
 ## 输出流程（一轮完成）
 
+### 0. 平台路由（第一步必做，先于任何下载命令）
+
+先看链接域名再选路线，**不要无脑先跑 yt-dlp**：
+- **快手**（v.kuaishou.com / kuaishou.com / chenzhongtech.com）→ 直接跳到「快手兜底」章节运行 `scripts\kuaishou.py`，**禁止用 yt-dlp**（yt-dlp 无快手提取器，必失败）
+- **抖音**（douyin.com）→ 先试步骤 2 的 yt-dlp，失败或有水印再走「抖音兜底」
+- **其他平台** → 步骤 2 的 yt-dlp
+
+完整对照见「平台策略速查」表。
+
 ### 1. 开头（文字，随工具调用一起输出）
 
 自然回应，每次不一样，像朋友：
@@ -42,6 +51,8 @@ python -m yt_dlp --version; & "C:\ffmpeg\bin\ffmpeg.exe" -version | Select-Objec
 - "嘿嘿收到，稍等哈 📥"
 
 ### 2. 下载文件（工具调用）
+
+> ⚠️ **快手链接跳过本节**，直接用「快手兜底」章节的脚本。
 
 **视频（默认，无水印，≤1080p）：**
 
