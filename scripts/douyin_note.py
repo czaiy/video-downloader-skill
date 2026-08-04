@@ -100,6 +100,38 @@ def long_path(p):
     return p
 
 
+def ensure_jpeg(path):
+    """Convert .webp to .jpeg so WeChat can display it inline
+    (WeChat/.NET SetImage does not understand webp). Requires PIL;
+    falls back to keeping the webp when PIL is unavailable."""
+    if not path.lower().endswith(".webp"):
+        return path
+    try:
+        from PIL import Image
+    except ImportError:
+        return path
+    try:
+        im = Image.open(path)
+        im.load()
+        if im.mode in ("RGBA", "LA", "P", "PA"):
+            rgba = im.convert("RGBA")
+            bg = Image.new("RGB", rgba.size, (255, 255, 255))
+            bg.paste(rgba, mask=rgba.split()[-1])
+            im = bg
+        elif im.mode != "RGB":
+            im = im.convert("RGB")
+        out = path[:-5] + ".jpeg"
+        im.save(out, "JPEG", quality=95)
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return out
+    except Exception as e:
+        print(f"jpeg convert failed ({e}), keeping webp", file=sys.stderr)
+        return path
+
+
 def save(url, path, referer=None):
     _, blob = http_get(url, referer=referer)
     with open(path, "wb") as f:
@@ -140,6 +172,7 @@ def main():
             ext = ".jpeg" if ".jpeg" in img_url or ".jpg" in img_url else ".webp"
             path = save(img_url, os.path.join(outdir, f"dl_media_img{i}{ext}"),
                         referer="https://www.douyin.com/")
+            path = ensure_jpeg(path)
             print(f"IMG_{i}:{path}")
         return 0
 

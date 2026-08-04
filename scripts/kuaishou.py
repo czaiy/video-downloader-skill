@@ -101,6 +101,38 @@ def find_photo(data):
     return found.get("photo")
 
 
+def ensure_jpeg(path):
+    """Convert .webp to .jpeg so WeChat can display it inline
+    (WeChat/.NET SetImage does not understand webp). Requires PIL;
+    falls back to keeping the webp when PIL is unavailable."""
+    if not path.lower().endswith(".webp"):
+        return path
+    try:
+        from PIL import Image
+    except ImportError:
+        return path
+    try:
+        im = Image.open(path)
+        im.load()
+        if im.mode in ("RGBA", "LA", "P", "PA"):
+            rgba = im.convert("RGBA")
+            bg = Image.new("RGB", rgba.size, (255, 255, 255))
+            bg.paste(rgba, mask=rgba.split()[-1])
+            im = bg
+        elif im.mode != "RGB":
+            im = im.convert("RGB")
+        out = path[:-5] + ".jpeg"
+        im.save(out, "JPEG", quality=95)
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return out
+    except Exception as e:
+        print(f"jpeg convert failed ({e}), keeping webp", file=sys.stderr)
+        return path
+
+
 def long_path(p):
     """Return the absolute long-form path (expand 8.3 short names on Windows)."""
     p = os.path.abspath(p)
@@ -173,6 +205,7 @@ def main():
             ext = os.path.splitext(rel)[1] or ".webp"
             img_url = f"https://{host}{rel}"
             path = save(img_url, os.path.join(outdir, f"dl_media_img{i}{ext}"))
+            path = ensure_jpeg(path)
             print(f"IMG_{i}:{path}")
         return 0
 
@@ -183,6 +216,7 @@ def main():
         if img_url:
             ext = ".jpeg" if (".jpeg" in img_url or ".jpg" in img_url) else ".webp"
             path = save(img_url, os.path.join(outdir, f"dl_media_img1{ext}"))
+            path = ensure_jpeg(path)
             print(f"IMG_1:{path}")
             return 0
 
