@@ -37,6 +37,7 @@ import re
 import ssl
 import sys
 import urllib.request
+import zipfile
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -131,12 +132,23 @@ def download(url, dest, size_hint=0):
     raise IOError(f"download failed: {last_err}")
 
 
+def zip_files(paths, outdir):
+    dest = os.path.join(outdir, "dl_media_pan_all.zip")
+    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+        for p in paths:
+            zf.write(p, os.path.basename(p))
+    for p in paths:
+        os.remove(p)
+    return dest
+
+
 def main():
     if len(sys.argv) < 3:
         print("Usage: pan_baidu.py <share_text_or_url> <output_dir> [max_files]", file=sys.stderr)
         return 2
     text, outdir = sys.argv[1], sys.argv[2]
     max_files = int(sys.argv[3]) if len(sys.argv) > 3 else 10
+    want_zip = len(sys.argv) > 4 and sys.argv[4].lower() == "zip"
     os.makedirs(outdir, exist_ok=True)
 
     surl, pwd = parse_share(text)
@@ -169,6 +181,7 @@ def main():
 
     # 2. download each file
     saved = 0
+    saved_paths = []
     for item in files[:max_files]:
         fs_id = item.get("fs_id")
         name = safe_name(item.get("server_filename") or f"file_{fs_id}")
@@ -212,8 +225,18 @@ def main():
             print(f"WARN:下载失败 {name}: {e}")
             continue
         saved += 1
-        print(f"FILE_{saved}:{dest}")
+        saved_paths.append(dest)
 
+    if want_zip and len(saved_paths) >= 2:
+        try:
+            print(f"ZIP:{zip_files(saved_paths, outdir)}")
+        except Exception as e:
+            print(f"WARN:打包zip失败，改发原文件: {e}")
+            for i, p in enumerate(saved_paths, 1):
+                print(f"FILE_{i}:{p}")
+    else:
+        for i, p in enumerate(saved_paths, 1):
+            print(f"FILE_{i}:{p}")
     print(f"COUNT:{saved}")
     return 0 if saved > 0 else 1
 
