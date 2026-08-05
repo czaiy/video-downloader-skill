@@ -207,6 +207,7 @@ def main():
         return 1
 
     print("Pan:百度网盘")
+    st.update(total=min(len(items), max_files))
 
     # 2. download each file (dlink per file, throttled backend -> pause)
     saved = 0
@@ -226,6 +227,7 @@ def main():
         if size > MAX_SINGLE_BYTES:
             log(f"WARN:跳过超大文件 {name}（{size/1024/1024:.0f}MB > 500MB）")
             st.add_warn(f"跳过超大文件 {name}（{size/1024/1024:.0f}MB > 500MB）")
+            st.bump()
             continue
         try:
             dl = api_call("get_download_links", {
@@ -242,6 +244,7 @@ def main():
         except IOError as e:
             log(f"WARN:文件 {name} 获取直链失败: {e}")
             st.add_warn(f"获取直链失败 {name}: {e}")
+            st.bump()
             continue
         if dl.get("code") != 200 or not dl.get("data"):
             msg = str(dl.get("message", ""))
@@ -251,6 +254,7 @@ def main():
                 return 0 if saved else 1
             log(f"WARN:文件 {name} 获取直链失败: {msg}")
             st.add_warn(f"获取直链失败 {name}: {msg}")
+            st.bump()
             time.sleep(API_PAUSE)
             continue
         entry = dl["data"][0] if isinstance(dl.get("data"), list) else dl["data"]
@@ -258,6 +262,7 @@ def main():
         if not urls:
             log(f"WARN:文件 {name} 没拿到直链")
             st.add_warn(f"没拿到直链 {name}")
+            st.bump()
             continue
         dlink = urls[0] if isinstance(urls[0], str) else urls[0].get("url", "")
         dest = os.path.join(outdir, f"dl_media_pan{saved+1}_{name}")
@@ -272,10 +277,12 @@ def main():
         if not ok:
             log(f"WARN:下载失败 {name}: {err}")
             st.add_warn(f"下载失败 {name}: {err}")
+            st.bump()
         else:
             saved += 1
             saved_paths.append(dest)
             st.add_file(dest)
+            st.bump()
         time.sleep(API_PAUSE)
 
     zip_path = None

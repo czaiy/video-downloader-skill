@@ -108,6 +108,8 @@ class StatusFile:
             "started": time.strftime("%Y-%m-%d %H:%M:%S"),
             "running": True,
             "done": False,
+            "total": None,
+            "processed": 0,
             "saved": 0,
             "current": "",
             "files": [],
@@ -137,6 +139,11 @@ class StatusFile:
 
     def add_warn(self, msg):
         self.data["warns"].append(msg)
+        self._write()
+
+    def bump(self):
+        """One more item processed (saved / skipped / failed)."""
+        self.data["processed"] += 1
         self._write()
 
     def finish(self, zip_path=None):

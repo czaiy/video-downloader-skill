@@ -308,16 +308,18 @@ python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scri
 
 ### 长任务自动通知（必须遵守，防止"下完了却忘了发"）
 
-脚本会实时写 `<输出目录>\pan_status.json`（字段：`running`/`done`/`saved`/`current`/`files`/`zip`/`warns`），供外部检查进度。**AI 是被动触发的，对话一结束就"睡着"了，不会自己发现后台任务完成**——曾发生过下载完成后没人发送、用户干等的事故。所以启动网盘脚本时，若预计耗时较长（多文件 / 大文件 / 速度目测 <500KB/s），launch 托管会话后**必须**用 `future_task` 创建唤醒检查任务：
+脚本会实时写 `<输出目录>\pan_status.json`（字段：`running`/`done`/`total`/`processed`/`saved`/`current`/`files`/`zip`/`warns`），供外部检查进度。**AI 是被动触发的，对话一结束就"睡着"了，不会自己发现后台任务完成**——曾发生过下载完成后没人发送、用户干等的事故。所以启动网盘脚本时，若预计耗时较长（多文件 / 大文件 / 速度目测 <500KB/s），launch 托管会话后**必须**用 `future_task` 创建唤醒检查任务：
 
 - `action=create`，`run_once=true`，`run_at` = 当前时间 +3 分钟，`name="网盘下载检查"`
 - `note` 必须**自包含**（唤醒会话没有前文上下文），照抄模板并填好两个占位符：
 
 > 检查网盘下载任务：读取 `<输出目录>\pan_status.json`。
 > ① 文件不存在 = 任务已被处理或未启动，什么都不做，直接结束。
-> ② done=true：把 zip 字段指向的文件（若无 zip 则把 files 列表里的文件逐个）发送给用户——长路径先规范化，用 send_message_to_user、session=`<用户会话ID>`、file 组件；按文件大小 sleep 等上传完成后用 python os.remove 清理所有已发文件**和 pan_status.json**；warns 非空就在回复里简短提一句；最后给用户一句自然总结。
-> ③ done=false 且 running=true：任务还在跑，用 future_task 再排一个 +3 分钟的同样检查（把本 note 原样带上、更新检查次数），可顺带给用户发一句进度（saved=N，正在下 current 字段）。
+> ② done=true：把 zip 字段指向的文件（若无 zip 则把 files 列表里的文件逐个）发送给用户——长路径先规范化，用 send_message_to_user、session=`<用户会话ID>`、file 组件；按文件大小 sleep 等上传完成后用 python os.remove 清理所有已发文件**和 pan_status.json**；总结一句话即可，**不要主动列文件清单和 warns**（用户问起才据 files/warns 字段回答）。
+> ③ done=false 且 running=true：任务还在跑，用 future_task 再排一个 +3 分钟的同样检查（把本 note 原样带上、更新检查次数）；若 total 字段 >0，给用户只发一行：`下载进度：<processed÷total 四舍五入>%`，**不加任何其他内容**。
 > ④ 已重排 8 次（约 25 分钟）仍未完成：告知用户任务可能异常并停止排程，保留现场。
+
+- **进度播报极简化**：轮询中或唤醒时播报进度一律只说"下载进度：X%"；只有用户明确询问时，才根据状态文件 files/warns 字段回答"下载了什么 / 哪些没下载及原因"
 
 - `<用户会话ID>` 格式 `platform_id:message_type:session_id`（如 `CZAIY_BOT:FriendMessage:1209845636`、`CZAIY_BOT:GroupMessage:xxx`），从来消息上下文或此前 send_message_to_user 的返回中获取，**必须写进 note**，否则唤醒后发错会话
 - 若你自己轮询时任务正好完成并已发送清理：无需额外处理——唤醒任务看到 pan_status.json 不存在会安静退出（这就是清理时必须连 pan_status.json 一起删的原因）

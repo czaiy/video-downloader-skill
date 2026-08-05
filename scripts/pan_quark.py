@@ -238,6 +238,7 @@ def main():
         return 1
 
     print("Pan:夸克网盘", flush=True)
+    stf.update(total=min(len(files), max_files))
 
     # 3. per file: save -> direct link -> download
     saved = 0
@@ -249,6 +250,7 @@ def main():
         if size > MAX_SINGLE_BYTES:
             log(f"WARN:跳过超大文件 {name}（{size/1024/1024:.0f}MB > 500MB）")
             stf.add_warn(f"跳过超大文件 {name}（{size/1024/1024:.0f}MB > 500MB）")
+            stf.bump()
             continue
         try:
             fs = api_call("file_save.php", {
@@ -260,12 +262,14 @@ def main():
             if fs.get("code") != 0 or fs.get("file_id") in (None, ""):
                 log(f"WARN:转存失败 {name}: {fs.get('msg')}")
                 stf.add_warn(f"转存失败 {name}: {fs.get('msg')}")
+                stf.bump()
                 continue
             file_id = str(fs["file_id"])
             gl = api_call("get_link.php", {"id": file_id, "pwd": site_pwd})
             if gl.get("code") != 0 or not gl.get("download_url"):
                 log(f"WARN:获取直链失败 {name}: {gl.get('msg')}")
                 stf.add_warn(f"获取直链失败 {name}: {gl.get('msg')}")
+                stf.bump()
                 continue
             dest = os.path.join(outdir, f"dl_media_pan{saved+1}_{name}")
             hdrs = build_dl_headers(gl.get("header"))
@@ -274,14 +278,17 @@ def main():
             if not ok:
                 log(f"WARN:下载失败 {name}: {err}")
                 stf.add_warn(f"下载失败 {name}: {err}")
+                stf.bump()
                 continue
         except Exception as e:
             log(f"WARN:处理失败 {name}: {e}")
             stf.add_warn(f"处理失败 {name}: {e}")
+            stf.bump()
             continue
         saved += 1
         saved_paths.append(dest)
         stf.add_file(dest)
+        stf.bump()
 
     zip_path = None
     if want_zip and len(saved_paths) >= 2:
