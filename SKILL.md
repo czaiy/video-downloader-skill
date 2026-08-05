@@ -256,6 +256,34 @@ python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scri
 
 **拿不到就放弃，告诉用户"这个暂时下载不了"，不要继续尝试。**
 
+## 图片合成视频（compose.py）
+
+当帖子只有静态图片但用户想要视频格式时，用 ffmpeg 把图片合成为幻灯片视频 + 混入 BGM。
+
+**适用场景**：
+- 纯图文帖（无动图/live 内容）用户要求视频格式
+- 所有 API 兜底都失败时的最后防线
+- 用户明确说"做成视频"、"合成视频"、"幻灯片"
+
+**不适用**：帖子有真实动图/live 视频时，优先用 Hellotik/SnapAny 拿原片，不要合成。
+
+```powershell
+# 用法：compose.py <outdir> [duration_per_image] [transition_type]
+# duration_per_image: 每张图展示秒数（默认 3）
+# transition_type: fade/slideleft/slideright/circleopen/dissolve（默认 fade）
+python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scripts\compose.py" $env:TEMP 3 fade
+```
+
+**前置条件**：outdir 中已有 `dl_media_img*.jpg/jpeg/png/webp` 图片（由 douyin_note.py 等下载）+ 可选 `dl_media_audio.mp3` BGM。
+
+**输出**：`dl_media_composed.mp4`，脚本打印 `COMPOSED:<path>`。
+
+**注意**：
+- ffmpeg 必须可用（`C:\ffmpeg\bin\ffmpeg.exe` 或 PATH）
+- 图片会统一缩放到 1080x1920（竖屏），黑边填充
+- 有音频时自动混入，`-shortest` 截断到音频长度
+- 合成后用 `send_message_to_user` 发送，按 Step 6 的 sleep+清理规则处理
+
 ## 错误处理
 
 失败时简短告知，不要反复重试：
