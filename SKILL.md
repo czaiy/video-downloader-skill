@@ -1,6 +1,6 @@
 ---
 name: video-downloader
-description: "Use this skill when the user sends a video URL and wants to download the video file. Supports TikTok, YouTube, Bilibili, Twitter/X, Instagram, Douyin, Kuaishou, Xiaohongshu, Weibo, and 1000+ sites. Triggers: user pastes a video link and asks to download, save, parse, or get the video. Also triggers for \"帮我下载这个视频\", \"把这个视频发给我\", or any video URL from supported platforms."
+description: "Use this skill when the user sends a video URL and wants to download the video file. Supports TikTok, YouTube, Bilibili, Twitter/X, Instagram, Douyin, Kuaishou, Xiaohongshu, Weibo, and 1000+ sites. Also supports Baidu Netdisk (pan.baidu.com) and Quark Netdisk (pan.quark.cn) share links to download shared files. Triggers: user pastes a video link and asks to download, save, parse, or get the video. Also triggers for \"帮我下载这个视频\", \"把这个视频发给我\", \"帮我下载网盘文件\", or any video/netdisk URL from supported platforms."
 ---
 
 # Video Downloader Skill (Windows 版)
@@ -35,6 +35,7 @@ python -m yt_dlp --version; & "C:\ffmpeg\bin\ffmpeg.exe" -version | Select-Objec
 ### 0. 平台路由（第一步必做，先于任何下载命令）
 
 先看链接域名再选路线，**不要无脑先跑 yt-dlp**：
+- **网盘分享**（pan.baidu.com / pan.quark.cn）→ 直接跳到「网盘链接解析」章节运行对应脚本，**禁止用 yt-dlp**
 - **快手**（v.kuaishou.com / kuaishou.com / chenzhongtech.com）→ 直接跳到「快手兜底」章节运行 `scripts\kuaishou.py`，**禁止用 yt-dlp**（yt-dlp 无快手提取器，必失败）
 - **抖音**（douyin.com）→ 先试步骤 2 的 yt-dlp，失败或有水印再走「抖音兜底」
 - **其他平台** → 步骤 2 的 yt-dlp
@@ -155,6 +156,8 @@ $totalMB = (Get-ChildItem "$env:TEMP\dl_media*" | Measure-Object Length -Sum).Su
 | B站 bilibili.com | yt-dlp | 412 风控 → 提示用户提供 cookies |
 | 微博 weibo.com / weibo.cn | yt-dlp（WeiboVideo） | m.weibo.cn/status 格式最稳 |
 | TikTok / YouTube / Instagram | yt-dlp | 失败就放弃并告知 |
+| **百度网盘 pan.baidu.com** | **直接 `scripts\pan_baidu.py`** | 仅文件不支持文件夹；禁 yt-dlp |
+| **夸克网盘 pan.quark.cn** | **直接 `scripts\pan_quark.py`** | 支持文件夹递归；需 config 解析密码；禁 yt-dlp |
 
 **快手特殊说明**：平台源画质封顶约 720p，这是平台限制，属正常现象，不用折腾更高清晰度。
 
@@ -283,6 +286,28 @@ python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scri
 - 图片会统一缩放到 1080x1920（竖屏），黑边填充
 - 有音频时自动混入，`-shortest` 截断到音频长度
 - 合成后用 `send_message_to_user` 发送，按 Step 6 的 sleep+清理规则处理
+
+## 网盘链接解析（百度网盘 / 夸克网盘）
+
+用户粘贴网盘分享链接/分享文本时，这是文件不是视频，**跳过 yt-dlp**，直接运行对应脚本。两个脚本都走公益解析站，无需登录网盘账号。
+
+| 网盘 | 脚本 | 能力 |
+|---|---|---|
+| 百度网盘 pan.baidu.com | `scripts\pan_baidu.py` | 仅文件，不支持文件夹（后端限制） |
+| 夸克网盘 pan.quark.cn | `scripts\pan_quark.py` | 支持文件夹递归（最多 2 层） |
+
+```powershell
+python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scripts\pan_baidu.py" "完整分享文本(含提取码)" $env:TEMP
+python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scripts\pan_quark.py" "完整分享文本(含提取码)" $env:TEMP
+```
+
+- 把用户发来的整段分享文本原样传入，脚本自动提取链接和提取码（支持 `?pwd=`、`提取码:xxxx` 等格式）
+- 输出 `Pan:`、`FILE_n:<path>`（每个文件一行）、`COUNT:`；下载文件名带 `dl_media` 前缀，沿用第 6 步的清理规则
+- 拿到路径后按「抖音兜底」小节的后处理流程执行：长路径规范化 → `send_message_to_user` 发 file 组件（多文件发多个组件）→ sleep+清理
+- 限制：单文件 ≤500MB（超了自动跳过并输出 WARN）；百度只出文件不出文件夹；夸克文件夹最多递归 2 层
+- **夸克解析密码**：存在 skill 目录 `config.json` 的 `quark_parse_pwd` 字段（已 gitignore）。密码**每日轮换**，需按官方指引领取：https://www.yuque.com/wpurl/vp60ux/xu3codnavvxzdgr9（快手极速版搜"诱因诱空"→第一个短剧→第29集→第一个字幕台词）。报"解析密码错误"时提示用户重新获取并更新 config，不要反复重试
+- 百度报错含 `-20` = 触发百度验证码，直接告知用户暂不能解析，不要重试
+- 公益站可能限速/抽风，失败就按错误处理话术告知，不要死磕
 
 ## 错误处理
 
