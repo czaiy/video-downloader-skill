@@ -36,10 +36,13 @@ Pure stdlib, no deps.
 import json
 import os
 import re
-import ssl
 import sys
+import time
 import urllib.request
+import urllib.error
 import zipfile
+
+from pan_common import safe_name, download_file, log
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -49,17 +52,11 @@ except Exception:
 
 API_BASE = "https://kk.wpurl.cc/api"
 TIMEOUT = 60
-DL_TIMEOUT = 600
 MAX_SINGLE_BYTES = 500 * 1024 * 1024
 DESKTOP_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
 )
-
-try:
-    _ctx = ssl.create_default_context()
-except Exception:
-    _ctx = None
 
 
 def load_site_pwd():
@@ -107,7 +104,7 @@ def collect_files(pwd_id, stoken_url, site_pwd, pdir_fid="0", prefix="", depth=0
                         pwd_id, stoken_url, site_pwd, e.get("fid"),
                         f"{prefix}{name}_", depth + 1, max_depth))
                 else:
-                    print(f"WARN:跳过过深文件夹 {prefix}{name}（最多 {max_depth} 层）")
+                    log(f"WARN:跳过过深文件夹 {prefix}{name}（最多 {max_depth} 层）")
             else:
                 e["_prefix"] = prefix
                 out.append(e)
@@ -117,7 +114,7 @@ def collect_files(pwd_id, stoken_url, site_pwd, pdir_fid="0", prefix="", depth=0
     return out
 
 
-def api_call(path, payload):
+def _post_once(path, payload):
     req = urllib.request.Request(
         f"{API_BASE}/{path}",
         data=json.dumps(payload).encode(),
@@ -130,8 +127,27 @@ def api_call(path, payload):
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=TIMEOUT, context=_ctx) as resp:
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
         return json.loads(resp.read().decode("utf-8", "replace"))
+
+
+def api_call(path, payload, tries=4):
+    """POST with retry/backoff (public parse sites are often flaky)."""
+    for i in range(tries):
+        try:
+            return _post_once(path, payload)
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", "replace")
+            except Exception:
+                pass
+            log(f"API:{path} HTTP {e.code} {body[:120]} (attempt {i+1}/{tries})")
+        except Exception as e:
+            log(f"API:{path} {type(e).__name__} (attempt {i+1}/{tries})")
+        if i < tries - 1:
+            time.sleep(8 + 4 * i)
+    raise IOError(f"API {path} 多次失败，解析站可能暂时不可用")
 
 
 def parse_share(text):
@@ -147,42 +163,24 @@ def parse_share(text):
     return pwd_id, passcode
 
 
-def safe_name(name):
-    return re.sub(r'[\\/:*?"<>|\r\n]', "_", name).strip() or "file"
-
-
-def download(url, dest, headers=None, size_hint=0):
+def build_dl_headers(api_header):
+    """Merge get_link.php `header` into HTTP headers.
+    cookie_puus -> Cookie: __puus=... (required to avoid 412)."""
     h = {
         "User-Agent": DESKTOP_UA,
         "Accept": "*/*",
         "Referer": "https://pan.quark.cn/",
     }
-    if headers:
-        for k, v in headers.items():
+    if api_header:
+        for k, v in api_header.items():
             if not k or not v:
                 continue
             lk = str(k).lower()
-            if "cookie" in lk:  # e.g. cookie_puus -> Cookie: __puus=...
+            if "cookie" in lk:
                 h["Cookie"] = str(v)
             else:
                 h[str(k)] = str(v)
-    req = urllib.request.Request(url, headers=h)
-    with urllib.request.urlopen(req, timeout=DL_TIMEOUT, context=_ctx) as resp:
-        tmp = dest + ".part"
-        got = 0
-        with open(tmp, "wb") as f:
-            while True:
-                chunk = resp.read(256 * 1024)
-                if not chunk:
-                    break
-                f.write(chunk)
-                got += len(chunk)
-        if size_hint and got < size_hint * 0.95:
-            os.remove(tmp)
-            raise IOError(f"incomplete download {got}/{size_hint}")
-        os.replace(tmp, dest)
-    return os.path.getsize(dest)
-
+    return h
 
 def zip_files(paths, outdir):
     dest = os.path.join(outdir, "dl_media_pan_all.zip")
@@ -233,7 +231,7 @@ def main():
         print("ERROR: 分享里没有可下载的文件", file=sys.stderr)
         return 1
 
-    print("Pan:夸克网盘")
+    print("Pan:夸克网盘", flush=True)
 
     # 3. per file: save -> direct link -> download
     saved = 0
@@ -242,7 +240,7 @@ def main():
         name = safe_name((item.get("_prefix") or "") + (item.get("file_name") or "file"))
         size = int(item.get("size") or 0)
         if size > MAX_SINGLE_BYTES:
-            print(f"WARN:跳过超大文件 {name}（{size/1024/1024:.0f}MB > 500MB）")
+            log(f"WARN:跳过超大文件 {name}（{size/1024/1024:.0f}MB > 500MB）")
             continue
         try:
             fs = api_call("file_save.php", {
@@ -252,32 +250,37 @@ def main():
                 "pwd_id": pwd_id, "stoken": stoken, "pwd": site_pwd,
             })
             if fs.get("code") != 0 or fs.get("file_id") in (None, ""):
-                print(f"WARN:转存失败 {name}: {fs.get('msg')}")
+                log(f"WARN:转存失败 {name}: {fs.get('msg')}")
                 continue
             file_id = str(fs["file_id"])
             gl = api_call("get_link.php", {"id": file_id, "pwd": site_pwd})
             if gl.get("code") != 0 or not gl.get("download_url"):
-                print(f"WARN:获取直链失败 {name}: {gl.get('msg')}")
+                log(f"WARN:获取直链失败 {name}: {gl.get('msg')}")
                 continue
             dest = os.path.join(outdir, f"dl_media_pan{saved+1}_{name}")
-            got = download(gl["download_url"], dest, gl.get("header"), size)
+            hdrs = build_dl_headers(gl.get("header"))
+            ok, got, err = download_file(gl["download_url"], dest, hdrs,
+                                         label=name, max_bytes=MAX_SINGLE_BYTES)
+            if not ok:
+                log(f"WARN:下载失败 {name}: {err}")
+                continue
         except Exception as e:
-            print(f"WARN:处理失败 {name}: {e}")
+            log(f"WARN:处理失败 {name}: {e}")
             continue
         saved += 1
         saved_paths.append(dest)
 
     if want_zip and len(saved_paths) >= 2:
         try:
-            print(f"ZIP:{zip_files(saved_paths, outdir)}")
+            log(f"ZIP:{zip_files(saved_paths, outdir)}")
         except Exception as e:
-            print(f"WARN:打包zip失败，改发原文件: {e}")
+            log(f"WARN:打包zip失败，改发原文件: {e}")
             for i, p in enumerate(saved_paths, 1):
-                print(f"FILE_{i}:{p}")
+                log(f"FILE_{i}:{p}")
     else:
         for i, p in enumerate(saved_paths, 1):
-            print(f"FILE_{i}:{p}")
-    print(f"COUNT:{saved}")
+            log(f"FILE_{i}:{p}")
+    log(f"COUNT:{saved}")
     return 0 if saved > 0 else 1
 
 

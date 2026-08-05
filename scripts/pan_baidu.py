@@ -6,38 +6,45 @@ pan_baidu.py - Baidu Netdisk (百度网盘) share link parser & downloader.
 Backend: 闪链 public parse API (mf.dp.wpurl.cc), no auth needed.
 Flow (reverse-engineered 2026-08-05):
   POST /api/v1/user/parse/get_file_list   {url, surl, pwd, dir, parse_password}
-       -> {uk, shareid, randsk, uname, list:[{fs_id, server_filename, size, is_dir, path, md5}]}
+       -> {uk, shareid, randsk, uname, list:[{fs_id, server_filename, size, is_dir, path}]}
+       dir = full path from share root, e.g. "/我的资源/子文件夹" (folders recurse!)
   POST /api/v1/user/parse/get_download_links {randsk, uk, shareid, fs_id[], surl, dir, pwd,
        token:"guest", parse_password, vcode_str, vcode_input}
        -> [{filename, urls:[dlink...], ua}]   (dlink expires in ~8h)
+  NOTE: randsk/uk/shareid MUST come from the get_file_list call of the SAME
+  directory that contains the file, otherwise backend answers 20005 参数错误.
 
 Usage:
-    python pan_baidu.py "<share text or url>" <output_dir> [max_files]
+    python pan_baidu.py "<share text or url>" <output_dir> [max_files] [zip]
 
 Notes:
-  - Folders are NOT supported by the backend (allow_folder=false); dirs are
-    skipped with a WARN line.
+  - Folders are traversed recursively (depth <= MAX_DEPTH).
+  - Backend bursts are rate-limited: every API call retries with backoff.
   - Error message containing "-20" means the backend hit a Baidu captcha;
     nothing we can do headless -> report and stop.
   - Single files larger than MAX_SINGLE_BYTES are skipped (WeChat upload).
+  - Downloads use multi-connection Range chunks (see pan_common.py).
 
 Output (stdout), one line per item:
     Pan:百度网盘
     Sharer:<nickname>
     COUNT:<number of downloaded files>
     FILE_1:<saved path>
-    WARN:<reason>        (skipped dirs / oversized files)
+    ZIP:<zip path>            (when zip mode and >=2 files)
+    WARN:<reason>             (skipped / failed items)
 
 Exit code 0 if at least one file was downloaded, non-zero otherwise.
 Pure stdlib, no deps.
 """
 import json
 import os
-import re
-import ssl
 import sys
+import time
 import urllib.request
+import urllib.error
 import zipfile
+
+from pan_common import safe_name, download_file, log
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -49,21 +56,21 @@ API_BASE = "https://mf.dp.wpurl.cc/api/v1/user/parse"
 TOKEN = "guest"
 PARSE_PASSWORD = ""
 TIMEOUT = 30
-DL_TIMEOUT = 600
 MAX_SINGLE_BYTES = 500 * 1024 * 1024  # 500MB cap per file
+MAX_DEPTH = 3                          # folder recursion limit
+API_PAUSE = 3                          # seconds between parse API calls
 DESKTOP_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
 )
 NETDISK_UA = "netdisk;2.0.30.6;PC;PC-Windows;10.0.19045;WindowsBaiduYunGuanJia"
 
-try:
-    _ctx = ssl.create_default_context()
-except Exception:
-    _ctx = None
+
+class CaptchaError(Exception):
+    pass
 
 
-def api_call(path, payload):
+def _post_once(path, payload):
     req = urllib.request.Request(
         f"{API_BASE}/{path}",
         data=json.dumps(payload).encode(),
@@ -76,12 +83,33 @@ def api_call(path, payload):
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=TIMEOUT, context=_ctx) as resp:
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
         return json.loads(resp.read().decode("utf-8", "replace"))
 
 
+def api_call(path, payload, tries=4):
+    """POST with retry/backoff (backend burst rate-limiting is common)."""
+    for i in range(tries):
+        try:
+            return _post_once(path, payload)
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", "replace")
+            except Exception:
+                pass
+            if "-20" in body:
+                raise CaptchaError("百度验证码")
+            log(f"API:{path} HTTP {e.code} (attempt {i+1}/{tries})")
+        except Exception as e:
+            log(f"API:{path} {type(e).__name__} (attempt {i+1}/{tries})")
+        if i < tries - 1:
+            time.sleep(12 + 6 * i)
+    raise IOError(f"API {path} 多次失败，解析站可能暂时不可用")
+
+
 def parse_share(text):
-    """Extract surl + pwd from raw share text / url."""
+    import re
     m = re.search(r"pan\.baidu\.com/s/1([A-Za-z0-9_-]+)", text)
     if m:
         surl = "1" + m.group(1)
@@ -99,37 +127,36 @@ def parse_share(text):
     return surl, pwd
 
 
-def safe_name(name):
-    return re.sub(r'[\\/:*?"<>|\r\n]', "_", name).strip() or "file"
-
-
-def download(url, dest, size_hint=0):
-    last_err = None
-    for ua in (DESKTOP_UA, NETDISK_UA):
-        try:
-            req = urllib.request.Request(url, headers={
-                "User-Agent": ua,
-                "Accept": "*/*",
-                "Referer": "https://pan.baidu.com/",
-            })
-            with urllib.request.urlopen(req, timeout=DL_TIMEOUT, context=_ctx) as resp:
-                tmp = dest + ".part"
-                got = 0
-                with open(tmp, "wb") as f:
-                    while True:
-                        chunk = resp.read(256 * 1024)
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                        got += len(chunk)
-                if size_hint and got < size_hint * 0.95:
-                    os.remove(tmp)
-                    raise IOError(f"incomplete download {got}/{size_hint}")
-                os.replace(tmp, dest)
-            return os.path.getsize(dest)
-        except Exception as e:  # try next UA
-            last_err = e
-    raise IOError(f"download failed: {last_err}")
+def walk_dir(base_payload, dir_path, depth):
+    """
+    List dir_path and recurse into subfolders.
+    Returns list of (item, ctx) where ctx holds the randsk/uk/shareid/dir
+    of the directory containing the item.
+    """
+    fl = api_call("get_file_list", {**base_payload, "dir": dir_path})
+    if fl.get("code") != 200 or not fl.get("data"):
+        raise IOError(f"获取目录失败 {dir_path}: {fl.get('message', 'unknown')}")
+    data = fl["data"]
+    ctx = {"randsk": data.get("randsk", ""), "uk": data.get("uk"),
+           "shareid": data.get("shareid"), "dir": dir_path}
+    out = []
+    entries = data.get("list", []) or []
+    subdirs = []
+    for x in entries:
+        if x.get("is_dir"):
+            subdirs.append(x)
+        else:
+            out.append((x, ctx))
+    if depth < MAX_DEPTH:
+        for d in subdirs:
+            time.sleep(API_PAUSE)
+            sub = walk_dir(base_payload, d.get("path"), depth + 1)
+            log(f"DIR:{d.get('server_filename')} -> {len(sub)} 个文件")
+            out.extend(sub)
+    else:
+        for d in subdirs:
+            log(f"WARN:目录层级过深，跳过 {d.get('path')}")
+    return out
 
 
 def zip_files(paths, outdir):
@@ -144,7 +171,7 @@ def zip_files(paths, outdir):
 
 def main():
     if len(sys.argv) < 3:
-        print("Usage: pan_baidu.py <share_text_or_url> <output_dir> [max_files]", file=sys.stderr)
+        print("Usage: pan_baidu.py <share_text_or_url> <output_dir> [max_files] [zip]", file=sys.stderr)
         return 2
     text, outdir = sys.argv[1], sys.argv[2]
     max_files = int(sys.argv[3]) if len(sys.argv) > 3 else 10
@@ -156,88 +183,98 @@ def main():
         print("ERROR: 未找到有效的百度网盘分享链接", file=sys.stderr)
         return 1
 
-    # 1. file list
-    fl = api_call("get_file_list", {
+    base_payload = {
         "url": f"https://pan.baidu.com/s/{surl}",
-        "surl": surl, "pwd": pwd, "dir": "/", "parse_password": PARSE_PASSWORD,
-    })
-    if fl.get("code") != 200 or not fl.get("data"):
-        msg = fl.get("message", "unknown error")
-        print(f"ERROR: 获取文件列表失败: {msg}", file=sys.stderr)
+        "surl": surl, "pwd": pwd, "parse_password": PARSE_PASSWORD,
+    }
+
+    # 1. recursive listing
+    try:
+        items = walk_dir(base_payload, "/", 1)
+    except CaptchaError:
+        print("ERROR: 解析遇到百度验证码，暂无法自动处理", file=sys.stderr)
         return 1
-    data = fl["data"]
-    files = [x for x in data.get("list", []) if not x.get("is_dir")]
-    dirs = [x for x in data.get("list", []) if x.get("is_dir")]
-    for d in dirs:
-        print(f"WARN:跳过文件夹 {d.get('server_filename')}（接口暂不支持文件夹）")
-    if not files:
-        print("ERROR: 分享里没有可下载的文件（或只有文件夹）", file=sys.stderr)
+    except IOError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+    if not items:
+        print("ERROR: 分享里没有可下载的文件", file=sys.stderr)
         return 1
 
-    uname = data.get("uname", "")
-    print(f"Pan:百度网盘")
-    if uname:
-        print(f"Sharer:{uname}")
+    print("Pan:百度网盘")
 
-    # 2. download each file
+    # 2. download each file (dlink per file, throttled backend -> pause)
     saved = 0
     saved_paths = []
-    for item in files[:max_files]:
+    seen_names = set()
+    for item, ctx in items:
+        if saved >= max_files:
+            log(f"WARN:已达到 max_files={max_files}，剩余文件跳过")
+            break
         fs_id = item.get("fs_id")
         name = safe_name(item.get("server_filename") or f"file_{fs_id}")
+        if name in seen_names:  # same name from nested folders
+            name = f"{saved+1}_{name}"
+        seen_names.add(name)
         size = int(item.get("size") or 0)
         if size > MAX_SINGLE_BYTES:
-            print(f"WARN:跳过超大文件 {name}（{size/1024/1024:.0f}MB > 500MB）")
+            log(f"WARN:跳过超大文件 {name}（{size/1024/1024:.0f}MB > 500MB）")
             continue
         try:
             dl = api_call("get_download_links", {
-                "randsk": data.get("randsk", ""),
-                "uk": data.get("uk"),
-                "shareid": data.get("shareid"),
+                "randsk": ctx["randsk"], "uk": ctx["uk"], "shareid": ctx["shareid"],
                 "fs_id": [fs_id],
-                "surl": surl, "dir": "/", "pwd": pwd,
+                "surl": surl, "dir": ctx["dir"], "pwd": pwd,
                 "token": TOKEN, "parse_password": PARSE_PASSWORD,
                 "vcode_str": "", "vcode_input": "",
             })
-        except urllib.error.HTTPError as e:
-            body = e.read().decode("utf-8", "replace")
-            if "-20" in body:
-                print("ERROR: 解析遇到百度验证码，暂无法自动处理", file=sys.stderr)
-            else:
-                print(f"ERROR: 获取直链失败: {body[:200]}", file=sys.stderr)
-            return 1 if saved == 0 else 0
+        except CaptchaError:
+            print("ERROR: 解析遇到百度验证码，暂无法自动处理", file=sys.stderr)
+            return 0 if saved else 1
+        except IOError as e:
+            log(f"WARN:文件 {name} 获取直链失败: {e}")
+            continue
         if dl.get("code") != 200 or not dl.get("data"):
-            msg = dl.get("message", "")
-            if "-20" in str(msg):
+            msg = str(dl.get("message", ""))
+            if "-20" in msg:
                 print("ERROR: 解析遇到百度验证码，暂无法自动处理", file=sys.stderr)
-                return 1 if saved == 0 else 0
-            print(f"ERROR: 获取直链失败: {msg}", file=sys.stderr)
-            return 1 if saved == 0 else 0
-        entry = dl["data"][0]
+                return 0 if saved else 1
+            log(f"WARN:文件 {name} 获取直链失败: {msg}")
+            time.sleep(API_PAUSE)
+            continue
+        entry = dl["data"][0] if isinstance(dl.get("data"), list) else dl["data"]
         urls = entry.get("urls") or []
         if not urls:
-            print(f"WARN:文件 {name} 没拿到直链")
+            log(f"WARN:文件 {name} 没拿到直链")
             continue
+        dlink = urls[0] if isinstance(urls[0], str) else urls[0].get("url", "")
         dest = os.path.join(outdir, f"dl_media_pan{saved+1}_{name}")
-        try:
-            got = download(urls[0], dest, size)
-        except Exception as e:
-            print(f"WARN:下载失败 {name}: {e}")
-            continue
-        saved += 1
-        saved_paths.append(dest)
+        ok = False
+        for ua in (DESKTOP_UA, NETDISK_UA):  # UA fallback for CDN 403
+            hdrs = {"User-Agent": ua, "Accept": "*/*",
+                    "Referer": "https://pan.baidu.com/"}
+            ok, got, err = download_file(dlink, dest, hdrs, label=name,
+                                         max_bytes=MAX_SINGLE_BYTES)
+            if ok:
+                break
+        if not ok:
+            log(f"WARN:下载失败 {name}: {err}")
+        else:
+            saved += 1
+            saved_paths.append(dest)
+        time.sleep(API_PAUSE)
 
     if want_zip and len(saved_paths) >= 2:
         try:
-            print(f"ZIP:{zip_files(saved_paths, outdir)}")
+            log(f"ZIP:{zip_files(saved_paths, outdir)}")
         except Exception as e:
-            print(f"WARN:打包zip失败，改发原文件: {e}")
+            log(f"WARN:打包zip失败，改发原文件: {e}")
             for i, p in enumerate(saved_paths, 1):
-                print(f"FILE_{i}:{p}")
+                log(f"FILE_{i}:{p}")
     else:
         for i, p in enumerate(saved_paths, 1):
-            print(f"FILE_{i}:{p}")
-    print(f"COUNT:{saved}")
+            log(f"FILE_{i}:{p}")
+    log(f"COUNT:{saved}")
     return 0 if saved > 0 else 1
 
 

@@ -293,8 +293,10 @@ python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scri
 
 | 网盘 | 脚本 | 能力 |
 |---|---|---|
-| 百度网盘 pan.baidu.com | `scripts\pan_baidu.py` | 仅文件，不支持文件夹（后端限制） |
+| 百度网盘 pan.baidu.com | `scripts\pan_baidu.py` | 支持文件夹递归（最多 3 层） |
 | 夸克网盘 pan.quark.cn | `scripts\pan_quark.py` | 支持文件夹递归（最多 2 层） |
+
+两个脚本都用多线程 Range 分片并行下载（公益站直链单连接限速严重，分片并行实测提速可达百倍），并实时刷新进度行（`DIR:`/`DL:`/`OK:`/`WARN:`）。
 
 ```powershell
 # 末尾 zip 参数：下载完成后把所有文件打包成 dl_media_pan_all.zip，输出 ZIP:<path>
@@ -302,11 +304,13 @@ python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scri
 python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scripts\pan_quark.py" "完整分享文本(含提取码)" $env:TEMP 10 zip
 ```
 
+> ⚠️ **执行方式（重要）**：网盘脚本**禁止设短 timeout**。调用 `astrbot_execute_shell` 时**不要传 timeout 参数**（让它以托管会话方式挂着跑），然后用 `astrbot_shell_session` poll（yield_time_ms 20000~30000）轮询进度直到 completed。之前出过事故：设了 600s 硬超时，多文件下载没跑完进程就被强杀，只抢救出部分文件。轮询时 stdout 能实时看到 `DL:`/`OK:` 进度行，可向用户播报；**不要中途 interrupt 重跑**。
+
 - 把用户发来的整段分享文本原样传入，脚本自动提取链接和提取码（支持 `?pwd=`、`提取码:xxxx` 等格式）
 - **打包规则（省发送时间）**：多文件分享默认带 `zip` 参数——微信每发一个文件都要走一遍粘贴+发送流程，打包后只发一次，文档类还能压小体积；单文件不加；用户明确要"原文件/不要压缩"时也不加
 - 输出 `Pan:`、`FILE_n:<path>`（未打包）或 `ZIP:<path>`（打包后）、`COUNT:`；下载文件名带 `dl_media` 前缀，沿用第 6 步的清理规则
 - 拿到路径后按「抖音兜底」小节的后处理流程执行：长路径规范化 → `send_message_to_user` 发 file 组件（多文件发多个组件）→ sleep+清理
-- 限制：单文件 ≤500MB（超了自动跳过并输出 WARN）；百度只出文件不出文件夹；夸克文件夹最多递归 2 层
+- 限制：单文件 ≤500MB（超了自动跳过并输出 WARN）；百度文件夹最多递归 3 层；夸克文件夹最多递归 2 层
 - **夸克解析密码**：存在 skill 目录 `config.json` 的 `quark_parse_pwd` 字段（已 gitignore）。密码**每日轮换**，获取步骤（短剧名/集数会变，以官方文档为准）：https://www.yuque.com/wpurl/vp60ux/xu3codnavvxzdgr9（大致流程：快手极速版搜指定关键词→第一个短剧→文档指定集数→第一句字幕台词）。报"解析密码错误"时先重新抓取该文档确认最新步骤，再提示用户重新获取并更新 config，不要反复重试
 - 百度报错含 `-20` = 触发百度验证码，直接告知用户暂不能解析，不要重试
 - 公益站可能限速/抽风，失败就按错误处理话术告知，不要死磕
