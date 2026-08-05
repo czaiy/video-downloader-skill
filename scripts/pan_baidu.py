@@ -44,7 +44,7 @@ import urllib.request
 import urllib.error
 import zipfile
 
-from pan_common import safe_name, download_file, log
+from pan_common import safe_name, download_file, log, StatusFile
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -177,10 +177,12 @@ def main():
     max_files = int(sys.argv[3]) if len(sys.argv) > 3 else 10
     want_zip = len(sys.argv) > 4 and sys.argv[4].lower() == "zip"
     os.makedirs(outdir, exist_ok=True)
+    st = StatusFile(outdir, "百度网盘")
 
     surl, pwd = parse_share(text)
     if not surl:
         print("ERROR: 未找到有效的百度网盘分享链接", file=sys.stderr)
+        st.add_warn("未找到有效的分享链接"); st.finish()
         return 1
 
     base_payload = {
@@ -193,12 +195,15 @@ def main():
         items = walk_dir(base_payload, "/", 1)
     except CaptchaError:
         print("ERROR: 解析遇到百度验证码，暂无法自动处理", file=sys.stderr)
+        st.add_warn("百度验证码"); st.finish()
         return 1
     except IOError as e:
         print(f"ERROR: {e}", file=sys.stderr)
+        st.add_warn(str(e)); st.finish()
         return 1
     if not items:
         print("ERROR: 分享里没有可下载的文件", file=sys.stderr)
+        st.add_warn("分享里没有可下载的文件"); st.finish()
         return 1
 
     print("Pan:百度网盘")
@@ -216,9 +221,11 @@ def main():
         if name in seen_names:  # same name from nested folders
             name = f"{saved+1}_{name}"
         seen_names.add(name)
+        st.update(current=name)
         size = int(item.get("size") or 0)
         if size > MAX_SINGLE_BYTES:
             log(f"WARN:跳过超大文件 {name}（{size/1024/1024:.0f}MB > 500MB）")
+            st.add_warn(f"跳过超大文件 {name}（{size/1024/1024:.0f}MB > 500MB）")
             continue
         try:
             dl = api_call("get_download_links", {
@@ -230,22 +237,27 @@ def main():
             })
         except CaptchaError:
             print("ERROR: 解析遇到百度验证码，暂无法自动处理", file=sys.stderr)
+            st.add_warn("百度验证码，中止"); st.finish()
             return 0 if saved else 1
         except IOError as e:
             log(f"WARN:文件 {name} 获取直链失败: {e}")
+            st.add_warn(f"获取直链失败 {name}: {e}")
             continue
         if dl.get("code") != 200 or not dl.get("data"):
             msg = str(dl.get("message", ""))
             if "-20" in msg:
                 print("ERROR: 解析遇到百度验证码，暂无法自动处理", file=sys.stderr)
+                st.add_warn("百度验证码，中止"); st.finish()
                 return 0 if saved else 1
             log(f"WARN:文件 {name} 获取直链失败: {msg}")
+            st.add_warn(f"获取直链失败 {name}: {msg}")
             time.sleep(API_PAUSE)
             continue
         entry = dl["data"][0] if isinstance(dl.get("data"), list) else dl["data"]
         urls = entry.get("urls") or []
         if not urls:
             log(f"WARN:文件 {name} 没拿到直链")
+            st.add_warn(f"没拿到直链 {name}")
             continue
         dlink = urls[0] if isinstance(urls[0], str) else urls[0].get("url", "")
         dest = os.path.join(outdir, f"dl_media_pan{saved+1}_{name}")
@@ -259,21 +271,27 @@ def main():
                 break
         if not ok:
             log(f"WARN:下载失败 {name}: {err}")
+            st.add_warn(f"下载失败 {name}: {err}")
         else:
             saved += 1
             saved_paths.append(dest)
+            st.add_file(dest)
         time.sleep(API_PAUSE)
 
+    zip_path = None
     if want_zip and len(saved_paths) >= 2:
         try:
-            log(f"ZIP:{zip_files(saved_paths, outdir)}")
+            zip_path = zip_files(saved_paths, outdir)
+            log(f"ZIP:{zip_path}")
         except Exception as e:
             log(f"WARN:打包zip失败，改发原文件: {e}")
+            st.add_warn(f"打包zip失败: {e}")
             for i, p in enumerate(saved_paths, 1):
                 log(f"FILE_{i}:{p}")
     else:
         for i, p in enumerate(saved_paths, 1):
             log(f"FILE_{i}:{p}")
+    st.finish(zip_path)
     log(f"COUNT:{saved}")
     return 0 if saved > 0 else 1
 

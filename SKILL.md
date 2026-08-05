@@ -306,9 +306,27 @@ python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scri
 
 > ⚠️ **执行方式（重要）**：网盘脚本**禁止设短 timeout**。调用 `astrbot_execute_shell` 时**不要传 timeout 参数**（让它以托管会话方式挂着跑），然后用 `astrbot_shell_session` poll（yield_time_ms 20000~30000）轮询进度直到 completed。之前出过事故：设了 600s 硬超时，多文件下载没跑完进程就被强杀，只抢救出部分文件。轮询时 stdout 能实时看到 `DL:`/`OK:` 进度行，可向用户播报；**不要中途 interrupt 重跑**。
 
+### 长任务自动通知（必须遵守，防止"下完了却忘了发"）
+
+脚本会实时写 `<输出目录>\pan_status.json`（字段：`running`/`done`/`saved`/`current`/`files`/`zip`/`warns`），供外部检查进度。**AI 是被动触发的，对话一结束就"睡着"了，不会自己发现后台任务完成**——曾发生过下载完成后没人发送、用户干等的事故。所以启动网盘脚本时，若预计耗时较长（多文件 / 大文件 / 速度目测 <500KB/s），launch 托管会话后**必须**用 `future_task` 创建唤醒检查任务：
+
+- `action=create`，`run_once=true`，`run_at` = 当前时间 +3 分钟，`name="网盘下载检查"`
+- `note` 必须**自包含**（唤醒会话没有前文上下文），照抄模板并填好两个占位符：
+
+> 检查网盘下载任务：读取 `<输出目录>\pan_status.json`。
+> ① 文件不存在 = 任务已被处理或未启动，什么都不做，直接结束。
+> ② done=true：把 zip 字段指向的文件（若无 zip 则把 files 列表里的文件逐个）发送给用户——长路径先规范化，用 send_message_to_user、session=`<用户会话ID>`、file 组件；按文件大小 sleep 等上传完成后用 python os.remove 清理所有已发文件**和 pan_status.json**；warns 非空就在回复里简短提一句；最后给用户一句自然总结。
+> ③ done=false 且 running=true：任务还在跑，用 future_task 再排一个 +3 分钟的同样检查（把本 note 原样带上、更新检查次数），可顺带给用户发一句进度（saved=N，正在下 current 字段）。
+> ④ 已重排 8 次（约 25 分钟）仍未完成：告知用户任务可能异常并停止排程，保留现场。
+
+- `<用户会话ID>` 格式 `platform_id:message_type:session_id`（如 `CZAIY_BOT:FriendMessage:1209845636`、`CZAIY_BOT:GroupMessage:xxx`），从来消息上下文或此前 send_message_to_user 的返回中获取，**必须写进 note**，否则唤醒后发错会话
+- 若你自己轮询时任务正好完成并已发送清理：无需额外处理——唤醒任务看到 pan_status.json 不存在会安静退出（这就是清理时必须连 pan_status.json 一起删的原因）
+- 短任务（单小文件、预计 1 分钟内完成）不需要排唤醒任务，正常轮询等待即可
+
 - 把用户发来的整段分享文本原样传入，脚本自动提取链接和提取码（支持 `?pwd=`、`提取码:xxxx` 等格式）
 - **打包规则（省发送时间）**：多文件分享默认带 `zip` 参数——微信每发一个文件都要走一遍粘贴+发送流程，打包后只发一次，文档类还能压小体积；单文件不加；用户明确要"原文件/不要压缩"时也不加
-- 输出 `Pan:`、`FILE_n:<path>`（未打包）或 `ZIP:<path>`（打包后）、`COUNT:`；下载文件名带 `dl_media` 前缀，沿用第 6 步的清理规则
+- 输出 `Pan:`、`FILE_n:<path>`（未打包）或 `ZIP:<path>`（打包后）、`COUNT:`；下载文件名带 `dl_media` 前缀，沿用第 6 步的清理规则；同时实时写 `pan_status.json` 状态文件（供唤醒任务检查，发送清理时要一起删）
+- 单个文件下载失败会自动重试 3 次（覆盖 5xx/522/断连等瞬时错误），仍失败才记 WARN + `pan_status.json` 的 warns 并跳过
 - 拿到路径后按「抖音兜底」小节的后处理流程执行：长路径规范化 → `send_message_to_user` 发 file 组件（多文件发多个组件）→ sleep+清理
 - 限制：单文件 ≤500MB（超了自动跳过并输出 WARN）；百度文件夹最多递归 3 层；夸克文件夹最多递归 2 层
 - **夸克解析密码**：存在 skill 目录 `config.json` 的 `quark_parse_pwd` 字段（已 gitignore）。密码**每日轮换**，获取步骤（短剧名/集数会变，以官方文档为准）：https://www.yuque.com/wpurl/vp60ux/xu3codnavvxzdgr9（大致流程：快手极速版搜指定关键词→第一个短剧→文档指定集数→第一句字幕台词）。报"解析密码错误"时先重新抓取该文档确认最新步骤，再提示用户重新获取并更新 config，不要反复重试

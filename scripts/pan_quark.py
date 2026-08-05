@@ -42,7 +42,7 @@ import urllib.request
 import urllib.error
 import zipfile
 
-from pan_common import safe_name, download_file, log
+from pan_common import safe_name, download_file, log, StatusFile
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -200,10 +200,12 @@ def main():
     max_files = int(sys.argv[3]) if len(sys.argv) > 3 else 10
     want_zip = len(sys.argv) > 4 and sys.argv[4].lower() == "zip"
     os.makedirs(outdir, exist_ok=True)
+    stf = StatusFile(outdir, "夸克网盘")
 
     pwd_id, passcode = parse_share(text)
     if not pwd_id:
         print("ERROR: 未找到有效的夸克网盘分享链接", file=sys.stderr)
+        stf.add_warn("未找到有效的分享链接"); stf.finish()
         return 1
     site_pwd = load_site_pwd()
     if not site_pwd:
@@ -211,12 +213,14 @@ def main():
               "（https://www.yuque.com/wpurl/vp60ux/xu3codnavvxzdgr9），"
               "填入 skill config.json 的 quark_parse_pwd 或环境变量 QUARK_PARSE_PWD",
               file=sys.stderr)
+        stf.add_warn("缺少夸克解析密码"); stf.finish()
         return 1
 
     # 1. stoken
     st = api_call("get_stoken.php", {"pwd_id": pwd_id, "passcode": passcode, "pwd": site_pwd})
     if st.get("code") != 0:
         print(f"ERROR: 获取分享令牌失败: {st.get('msg')}", file=sys.stderr)
+        stf.add_warn(f"获取分享令牌失败: {st.get('msg')}"); stf.finish()
         return 1
     stoken = st.get("stoken", "")
     stoken_url = st.get("stoken_url", "")
@@ -226,9 +230,11 @@ def main():
         files = collect_files(pwd_id, stoken_url, site_pwd)
     except Exception as e:
         print(f"ERROR: 获取文件列表失败: {e}", file=sys.stderr)
+        stf.add_warn(f"获取文件列表失败: {e}"); stf.finish()
         return 1
     if not files:
         print("ERROR: 分享里没有可下载的文件", file=sys.stderr)
+        stf.add_warn("分享里没有可下载的文件"); stf.finish()
         return 1
 
     print("Pan:夸克网盘", flush=True)
@@ -238,9 +244,11 @@ def main():
     saved_paths = []
     for item in files[:max_files]:
         name = safe_name((item.get("_prefix") or "") + (item.get("file_name") or "file"))
+        stf.update(current=name)
         size = int(item.get("size") or 0)
         if size > MAX_SINGLE_BYTES:
             log(f"WARN:跳过超大文件 {name}（{size/1024/1024:.0f}MB > 500MB）")
+            stf.add_warn(f"跳过超大文件 {name}（{size/1024/1024:.0f}MB > 500MB）")
             continue
         try:
             fs = api_call("file_save.php", {
@@ -251,11 +259,13 @@ def main():
             })
             if fs.get("code") != 0 or fs.get("file_id") in (None, ""):
                 log(f"WARN:转存失败 {name}: {fs.get('msg')}")
+                stf.add_warn(f"转存失败 {name}: {fs.get('msg')}")
                 continue
             file_id = str(fs["file_id"])
             gl = api_call("get_link.php", {"id": file_id, "pwd": site_pwd})
             if gl.get("code") != 0 or not gl.get("download_url"):
                 log(f"WARN:获取直链失败 {name}: {gl.get('msg')}")
+                stf.add_warn(f"获取直链失败 {name}: {gl.get('msg')}")
                 continue
             dest = os.path.join(outdir, f"dl_media_pan{saved+1}_{name}")
             hdrs = build_dl_headers(gl.get("header"))
@@ -263,23 +273,30 @@ def main():
                                          label=name, max_bytes=MAX_SINGLE_BYTES)
             if not ok:
                 log(f"WARN:下载失败 {name}: {err}")
+                stf.add_warn(f"下载失败 {name}: {err}")
                 continue
         except Exception as e:
             log(f"WARN:处理失败 {name}: {e}")
+            stf.add_warn(f"处理失败 {name}: {e}")
             continue
         saved += 1
         saved_paths.append(dest)
+        stf.add_file(dest)
 
+    zip_path = None
     if want_zip and len(saved_paths) >= 2:
         try:
-            log(f"ZIP:{zip_files(saved_paths, outdir)}")
+            zip_path = zip_files(saved_paths, outdir)
+            log(f"ZIP:{zip_path}")
         except Exception as e:
             log(f"WARN:打包zip失败，改发原文件: {e}")
+            stf.add_warn(f"打包zip失败: {e}")
             for i, p in enumerate(saved_paths, 1):
                 log(f"FILE_{i}:{p}")
     else:
         for i, p in enumerate(saved_paths, 1):
             log(f"FILE_{i}:{p}")
+    stf.finish(zip_path)
     log(f"COUNT:{saved}")
     return 0 if saved > 0 else 1
 

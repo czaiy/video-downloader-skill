@@ -91,11 +91,84 @@ def _download_range(url, headers, fh, start, end, label):
     return 0
 
 
-def download_file(url, dest, headers, label="file", max_bytes=None):
+import json as _json
+
+
+class StatusFile:
+    """
+    Writes <outdir>/pan_status.json so external watchers (e.g. scheduled
+    agent tasks) can check download progress/completion without needing
+    the shell session. Atomic replace on every update.
+    """
+
+    def __init__(self, outdir, pan_name):
+        self.path = os.path.join(outdir, "pan_status.json")
+        self.data = {
+            "pan": pan_name,
+            "started": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "running": True,
+            "done": False,
+            "saved": 0,
+            "current": "",
+            "files": [],
+            "zip": None,
+            "warns": [],
+            "finished": None,
+        }
+        self._write()
+
+    def _write(self):
+        try:
+            tmp = self.path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                _json.dump(self.data, f, ensure_ascii=False, indent=1)
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
+
+    def update(self, **kw):
+        self.data.update(kw)
+        self._write()
+
+    def add_file(self, path):
+        self.data["files"].append(path)
+        self.data["saved"] = len(self.data["files"])
+        self._write()
+
+    def add_warn(self, msg):
+        self.data["warns"].append(msg)
+        self._write()
+
+    def finish(self, zip_path=None):
+        self.data.update({
+            "running": False, "done": True,
+            "zip": zip_path, "current": "",
+            "finished": time.strftime("%Y-%m-%d %H:%M:%S"),
+        })
+        self._write()
+
+
+def download_file(url, dest, headers, label="file", max_bytes=None, attempts=3):
     """
     Download url -> dest (via .part), parallel Range chunks when possible.
+    Outer retry loop handles transient CDN errors (522/5xx/reset).
     Returns (ok, size_bytes, err_msg). Never raises.
     """
+    last_err = "unknown"
+    for attempt in range(1, attempts + 1):
+        ok, size, err = _download_once(url, dest, headers, label, max_bytes)
+        if ok:
+            return True, size, ""
+        last_err = err
+        if "too big" in str(err):
+            break  # permanent, no point retrying
+        if attempt < attempts:
+            log(f"RETRY: {label} attempt {attempt}/{attempts} failed ({err}), retry in {4*attempt}s")
+            time.sleep(4 * attempt)
+    return False, 0, last_err
+
+
+def _download_once(url, dest, headers, label, max_bytes):
     part = dest + ".part"
     t0 = time.time()
     try:
