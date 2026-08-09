@@ -132,7 +132,7 @@ def encrypt_request(payload, ticket, seed):
         enc = c.encryptor()
         ct = enc.update(pt) + enc.finalize()
         tag = enc.tag
-        ct = ct + tag
+    ct = ct + tag  # Web Crypto AES-GCM output = ciphertext || 16-byte tag (both libs)
     return base64.b64encode(ct).decode(), base64.b64encode(iv).decode()
 
 
@@ -153,8 +153,8 @@ def xor90(s):
 
 
 def decrypt_response(data_b64, key_hint):
-    _, Cipher, modes, backend = _load_crypto()
-    if not Cipher:
+    AES, Cipher, modes, backend = _load_crypto()
+    if not (AES or Cipher):
         return None
     c_raw = base64.b64decode(data_b64).decode("latin-1")
     k_raw = base64.b64decode(key_hint).decode("latin-1")
@@ -163,9 +163,14 @@ def decrypt_response(data_b64, key_hint):
     c_raw, k_raw = b64_swap(c_raw), b64_swap(k_raw)
     ct = base64.b64decode(c_raw)
     iv = base64.b64decode(k_raw)
-    cipher = Cipher(algorithms.AES(HARDCODED_KEY.encode("utf-8")), modes.CBC(iv), backend=backend)
-    dec = cipher.decryptor()
-    raw = dec.update(ct) + dec.finalize()
+    key = HARDCODED_KEY.encode("utf-8")
+    if AES:
+        c = AES.new(key, AES.MODE_CBC, iv)
+        raw = c.decrypt(ct)
+    else:
+        from cryptography.hazmat.primitives.ciphers import Cipher as _C, algorithms as _A, modes as _M
+        dec = _C(_A.AES(key), _M.CBC(iv)).decryptor()
+        raw = dec.update(ct) + dec.finalize()
     pad = raw[-1]
     if 1 <= pad <= 16 and all(b == pad for b in raw[-pad:]):
         raw = raw[:-pad]

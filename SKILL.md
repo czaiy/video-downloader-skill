@@ -37,7 +37,7 @@ python -m yt_dlp --version; & "C:\ffmpeg\bin\ffmpeg.exe" -version | Select-Objec
 先看链接域名再选路线，**不要无脑先跑 yt-dlp**：
 - **网盘分享**（pan.baidu.com / pan.quark.cn）→ 直接跳到「网盘链接解析」章节运行对应脚本，**禁止用 yt-dlp**
 - **快手**（v.kuaishou.com / kuaishou.com / chenzhongtech.com）→ 直接跳到「快手兜底」章节运行 `scripts\kuaishou.py`，**禁止用 yt-dlp**（yt-dlp 无快手提取器，必失败）
-- **抖音**（douyin.com）→ 先试步骤 2 的 yt-dlp，失败或有水印再走「抖音兜底」
+- **抖音**（douyin.com）→ **跳过 yt-dlp**，直接跳到「抖音解析」章节运行 `scripts\hellotik.py`（2026-08 起 yt-dlp 与抖音官方 API 在服务器 IP 上被风控拦死：空响应/"Fresh cookies needed"，别浪费时间）
 - **其他平台** → 步骤 2 的 yt-dlp
 
 完整对照见「平台策略速查」表。
@@ -150,7 +150,7 @@ $totalMB = (Get-ChildItem "$env:TEMP\dl_media*" | Measure-Object Length -Sum).Su
 
 | 平台（域名特征） | 首选路线 | 兜底/备注 |
 |---|---|---|
-| 抖音 douyin.com | yt-dlp | 失败/有水印 → `scripts\douyin_note.py` |
+| 抖音 douyin.com | **直接 `scripts\hellotik.py`**（2026-08-10 实测可用，视频/图文） | 失败/限速 → `scripts\douyin_note.py`（可能已失效）→ SnapAny；**禁先跑 yt-dlp**（服务器 IP 被风控，必失败） |
 | **快手 kuaishou.com / chenzhongtech.com** | **直接 `scripts\kuaishou.py`** | yt-dlp 无快手提取器，别浪费时间试 |
 | 小红书 xiaohongshu.com / xhslink.com | yt-dlp（XiaoHongShu 提取器） | 失败就放弃告知用户（API 有加密签名，无兜底） |
 | B站 bilibili.com | yt-dlp | 412 风控 → 提示用户提供 cookies |
@@ -181,11 +181,26 @@ python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scri
 
 脚本输出 `Author:`、`Desc:` 及 `VIDEO:<path>`（视频）或多行 `IMG_n:<path>`（图文帖，每张图一行）。**拿到路径后按「抖音兜底」小节的 4 步后处理流程执行**（长路径规范化 → 动图转 mp4 → send_message_to_user 发文件组件，多张图就发多个组件 → 清理）。
 
-## 抖音图文/视频兜底（yt-dlp 失败或仍有水印时）
+## 抖音解析（hellotik 优先，跳过 yt-dlp）
 
-如果 yt-dlp 下载失败且链接是 douyin.com（或用户反馈抖音视频带水印），
-用本技能自带的脚本 `scripts\douyin_note.py`（位于本 SKILL.md 所在目录的 scripts 子目录）。
-它用移动端 UA 解析分享页的 `_ROUTER_DATA`：图文帖逐张下载原图，视频则把 `playwm` 换成 `play` 拿无水印直链。
+> ⚠️ **2026-08 现状**：抖音把分享页改成纯 SPA（`_ROUTER_DATA` 不再内嵌视频数据），且官方 API（iteminfo/amemv/web detail）对服务器 IP 一律返回空响应——**yt-dlp 和 douyin_note.py 的旧路线全部失效**。抖音链接一律先走 hellotik（免费，2026-08-10 实测视频帖 3 秒出片）。
+
+**首选：hellotik**（支持视频帖 + 图文帖，输出 `Text:`/`VIDEO:`/`IMG_n:`）：
+
+```powershell
+python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scripts\hellotik.py" "链接或分享文本" $env:TEMP
+# 只要视频加 video 参数、只要图片加 image 参数（缺省全要）
+```
+
+**兜底链**（hellotik 报错/限速时按序降级）：
+1. `scripts\douyin_note.py`（见下，分享页改版后大概率报 "could not fetch router data"，快速失败不恋战）
+2. yt-dlp（大概率 "Fresh cookies needed"，仅当 hellotik 和 douyin_note 都异常时试一次）
+3. SnapAny（付费 1 credit，最后手段）
+
+### douyin_note.py（旧路线，保留备用）
+
+用移动端 UA 解析分享页的 `_ROUTER_DATA`：图文帖逐张下载原图，视频则把 `playwm` 换成 `play` 拿无水印直链。
+**注意：2026-08 抖音改版后此脚本基本失效**（分享页不再内嵌数据），仅当 hellotik 不可用时尝试。
 
 ```powershell
 python "<本skill目录>\scripts\douyin_note.py" "VIDEO_URL" $env:TEMP
@@ -235,9 +250,9 @@ python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scri
 python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scripts\snapany.py" "链接或分享文本" $env:TEMP video
 ```
 
-### Hellotik（免费，动图视频首选）
+### Hellotik（免费，抖音首选 + 动图视频首选）
 
-**免费，但 ticket 接口 10 分钟/IP 限速**。解析机制：每周轮换的 WebCrypto AES-GCM 加密请求 + AES-CBC 响应解密（逆向见脚本注释）。返回结构含 title/type/cover/videos[]/pics[]。
+**免费**。解析机制：每周轮换的 WebCrypto AES-GCM 加密请求 + AES-CBC 响应解密（逆向见脚本注释）。返回结构含 title/type/cover/videos[]/pics[]。**2026-08-10 修复后实测：抖音视频帖 3 秒出片**（此前脚本有两处 bug：GCM 密文漏拼 16 字节 tag 导致服务端报"请求数据解密失败"、响应解密 NameError）。
 
 ```powershell
 # 动图/live 视频首选
@@ -248,7 +263,7 @@ python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scri
 - 输出与其他脚本对齐：`Text:`/`VIDEO:`/`IMG_n:`/`AUDIO:`
 - 依赖：`pip install pycryptodome`（或 cryptography）；缺库时报错提示安装
 - 每次运行会重新抓取动态配置（profile 每周轮换），**不要缓存旧 chunk**
-- ⚠️ 限速策略：同一 IP 约 10 分钟一次 ticket；限速时返回特定错误，调用方应自动降级到 snapany
+- ⚠️ 限速策略：ticket 接口有 IP 限速（站点文案称约 10 分钟一次，实测 4 分钟内连续两次成功，限流较宽松但仍可能发生）；报 rate limited 时降级 douyin_note.py 或 snapany
 
 - 输出与其他脚本对齐：`Text:`/`VIDEO:`/`IMG_n:`/`AUDIO:`
 - key 在 skill 目录 `config.json`（已加入 .gitignore，**禁止提交**）；报错 `snapany_key missing` 就提示用户补 key
