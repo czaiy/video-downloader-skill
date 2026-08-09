@@ -99,7 +99,7 @@ Get-ChildItem "$env:TEMP\dl_media*" | Select-Object -ExpandProperty FullName
 
 用 `send_message_to_user` 发送，每个文件一个组件，**按扩展名选类型**：
 - 图片（`.jpeg`/`.jpg`/`.png`/`.gif`）→ `{"type": "image", "path": "完整绝对长路径"}`（微信才会直接显示图片）
-- 视频（`.mp4`）→ `{"type": "file", "path": "完整绝对长路径"}`
+- 视频（`.mp4`）→ `{"type": "video", "path": "完整绝对长路径"}`（微信才会显示成可播放的视频；**禁止用 `file`**，否则微信只显示成文件附件）
 - ⚠️ `.webp` 不要直接发：微信/.NET 不认 webp 会变成文件。兜底脚本已自动转 jpeg；如果是 yt-dlp 下载的 webp，先用 ffmpeg 转 jpeg 再发
 
 路径必须来自 `Get-ChildItem`/`Get-Item` 输出的完整路径（自动为长路径），**不要使用含 `ADMINI~1` 等 `~1` 短名称的路径**。
@@ -207,7 +207,7 @@ python "<本skill目录>\scripts\douyin_note.py" "VIDEO_URL" $env:TEMP audio
 2. 动图(webp/gif)先用 ffmpeg 转 mp4（见第 3 步）。静态 `.webp` 图片脚本已自动转成 `.jpeg`，无需处理。
 3. **必须调用 `send_message_to_user` 发送文件**，每个文件一个组件，**按扩展名选类型**：
    - 图片（`.jpeg`/`.jpg`/`.png`/`.gif`）→ `{"type": "image", "path": "<规范化后的绝对长路径>"}`
-   - 视频（`.mp4`）→ `{"type": "file", "path": "<规范化后的绝对长路径>"}`
+   - 视频（`.mp4`）→ `{"type": "video", "path": "<规范化后的绝对长路径>"}`（禁止用 `file`，否则微信只显示成文件附件）
    图片用 `file` 类型发会只显示成文件不能预览！只发文字总结、不发组件 = 任务失败。
 4. 如果某个路径 `Test-Path` 为 False，跳过该文件并在总结里说明。
 
