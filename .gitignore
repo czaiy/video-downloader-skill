@@ -3,3 +3,4 @@ __pycache__/
 *.tmp
 dl_media*
 config.json
+dousnap_token.txt

@@ -29,6 +29,8 @@ python -m yt_dlp --version; & "C:\ffmpeg\bin\ffmpeg.exe" -version | Select-Objec
 3. **不要使用 browser_use 工具**，只用 shell 命令
 4. 整体风格：像小女孩跟朋友聊天，自然活泼
 5. **结尾总结里绝对不要出现 #标签/hashtag 内容**，发出去之前把 #xxx 全部过滤掉
+6. **回复结构固定三段式**：开头回应文字（随工具调用一起输出）→ 发送文件组件 → 结尾总结文字。不要改成纯文字播报或先发总结后发文件
+7. **不要向用户提及内部工具/脚本/解析站名称**（tikweb/SSSTik/SaveTik/hellotik/dousnap/snapany/yt-dlp 等），用户只需要拿到文件；唯一例外是 SnapAny 消耗了 credit 时按既定规则在总结里说明
 
 ## 输出流程（一轮完成）
 
@@ -38,6 +40,7 @@ python -m yt_dlp --version; & "C:\ffmpeg\bin\ffmpeg.exe" -version | Select-Objec
 - **网盘分享**（pan.baidu.com / pan.quark.cn）→ 直接跳到「网盘链接解析」章节运行对应脚本，**禁止用 yt-dlp**
 - **快手**（v.kuaishou.com / kuaishou.com / chenzhongtech.com）→ 直接跳到「快手兜底」章节运行 `scripts\kuaishou.py`，**禁止用 yt-dlp**（yt-dlp 无快手提取器，必失败）
 - **抖音**（douyin.com）→ **跳过 yt-dlp**，直接跳到「抖音解析」章节运行 `scripts\hellotik.py`（2026-08 起 yt-dlp 与抖音官方 API 在服务器 IP 上被风控拦死：空响应/"Fresh cookies needed"，别浪费时间）
+- **TikTok**（tiktok.com / vm.tiktok.com / vt.tiktok.com / tiktok.com/t/）→ **跳过 yt-dlp**，直接跳到「TikTok 网页解析」章节运行 `scripts\tikweb.py`（2026-08-11 实测服务器直连 www.tiktok.com 连接超时，yt-dlp 必失败；第三方解析站 tikcdn.io/snapcdn.app 可达）
 - **其他平台** → 步骤 2 的 yt-dlp
 
 完整对照见「平台策略速查」表。
@@ -53,7 +56,7 @@ python -m yt_dlp --version; & "C:\ffmpeg\bin\ffmpeg.exe" -version | Select-Objec
 
 ### 2. 下载文件（工具调用）
 
-> ⚠️ **快手链接跳过本节**，直接用「快手兜底」章节的脚本。
+> ⚠️ **快手/TikTok 链接跳过本节**：快手用「快手兜底」章节脚本；TikTok 用「TikTok 网页解析」章节的 tikweb.py（服务器连不上 www.tiktok.com，yt-dlp 必超时，别试）。
 
 **视频（默认，无水印，≤1080p）：**
 
@@ -113,6 +116,9 @@ Get-ChildItem "$env:TEMP\dl_media*" | Select-Object -ExpandProperty FullName
 **★★★ 禁止机械后缀 ★★★**
 **绝对不要**在结尾固定加"无水印版"、"已去水印"、"高清无水印"这类套话——视频本身有没有水印一眼就能看出来，每次都说显得像复读机。
 
+**★★★ 禁止透露内部流程 ★★★**
+**绝对不要**在结尾提及"干净三段式"、"免费解析"、"没花 credit"这类内部流程描述——用户只需要拿到文件，不需要知道解析花了多少钱、走了几条链路。**唯一例外**：SnapAny 实际消耗了 credit 时，在总结里如实说明（例如"这个走了云端解析，消耗了 1 个 credit"）。
+
 **★★★ 加一句作品评论（重要）★★★**
 根据标题/文案内容，加一句自然可爱的真实反应，像朋友看了视频随口吐槽/夸奖。
 - 评论只基于已知信息（标题、博主名、平台），不要编造视频里的具体细节
@@ -150,12 +156,13 @@ $totalMB = (Get-ChildItem "$env:TEMP\dl_media*" | Measure-Object Length -Sum).Su
 
 | 平台（域名特征） | 首选路线 | 兜底/备注 |
 |---|---|---|
-| 抖音 douyin.com | **直接 `scripts\hellotik.py`**（2026-08-10 实测可用，视频/图文） | 失败/限速 → `scripts\douyin_note.py`（可能已失效）→ SnapAny；**禁先跑 yt-dlp**（服务器 IP 被风控，必失败） |
-| **快手 kuaishou.com / chenzhongtech.com** | **直接 `scripts\kuaishou.py`** | yt-dlp 无快手提取器，别浪费时间试 |
-| 小红书 xiaohongshu.com / xhslink.com | yt-dlp（XiaoHongShu 提取器） | 失败就放弃告知用户（API 有加密签名，无兜底） |
-| B站 bilibili.com | yt-dlp | 412 风控 → 提示用户提供 cookies |
+| 抖音 douyin.com | **直接 `scripts\hellotik.py`**（2026-08-10 实测可用，视频/图文） | 失败/限速 → `scripts\dousnap.py`（免费，2026-08-11 实测视频/图文/BGM 全通）→ `scripts\tikweb.py`（机会性）→ SnapAny；**禁先跑 yt-dlp**；douyin_note 改版后已失效，移出主链 |
+| **快手 kuaishou.com / chenzhongtech.com** | **直接 `scripts\kuaishou.py`** | 失败 → `scripts\dousnap.py` 机会性尝试（官方宣称支持，未验证）；yt-dlp 无快手提取器，别浪费时间试 |
+| 小红书 xiaohongshu.com / xhslink.com | yt-dlp（XiaoHongShu 提取器） | 失败 → `scripts\dousnap.py` 机会性尝试（官方宣称支持，未验证）→ 仍失败就放弃告知用户 |
+| B站 bilibili.com | yt-dlp | 412 风控 → `scripts\dousnap.py`（同步直出视频直链+MP3，2026-08-11 实测可用）→ 或提示用户提供 cookies |
 | 微博 weibo.com / weibo.cn | yt-dlp（WeiboVideo） | m.weibo.cn/status 格式最稳 |
-| TikTok / YouTube / Instagram | yt-dlp | 失败就放弃并告知 |
+| **TikTok tiktok.com / vm./vt. / /t/** | **直接 `scripts\tikweb.py`**（2026-08-11 实测可用，无水印/MP3/HD 原画） | **禁用 yt-dlp**（2026-08-11 实测服务器直连 www.tiktok.com 超时，必失败） |
+| YouTube / Instagram | yt-dlp | 失败就放弃并告知 |
 | **百度网盘 pan.baidu.com** | **直接 `scripts\pan_baidu.py`** | 仅文件不支持文件夹；禁 yt-dlp |
 | **夸克网盘 pan.quark.cn** | **直接 `scripts\pan_quark.py`** | 支持文件夹递归；需 config 解析密码；禁 yt-dlp |
 
@@ -193,9 +200,11 @@ python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scri
 ```
 
 **兜底链**（hellotik 报错/限速时按序降级）：
-1. `scripts\douyin_note.py`（见下，分享页改版后大概率报 "could not fetch router data"，快速失败不恋战）
-2. yt-dlp（大概率 "Fresh cookies needed"，仅当 hellotik 和 douyin_note 都异常时试一次）
+1. `scripts\dousnap.py`（免费，2026-08-11 实测视频/图文/BGM 全通，用法见「DouSnap 解析」章节；需登录 token，已配置）
+2. `scripts\tikweb.py`（免费，SSSTik/SaveTik 双引擎，用法见「TikTok 网页解析」章节；SaveTik 宣称支持抖音但 2026-08-11 实测后端 statusCode 326 连不上，属机会性尝试，失败不恋战）
 3. SnapAny（付费 1 credit，最后手段）
+
+（`scripts\douyin_note.py` 与 yt-dlp 在 2026-08 改版后均已确认失效，移出主链；douyin_note 文档保留在下方仅供参考，不要再跑）
 
 ### douyin_note.py（旧路线，保留备用）
 
@@ -226,11 +235,55 @@ python "<本skill目录>\scripts\douyin_note.py" "VIDEO_URL" $env:TEMP audio
    图片用 `file` 类型发会只显示成文件不能预览！只发文字总结、不发组件 = 任务失败。
 4. 如果某个路径 `Test-Path` 为 False，跳过该文件并在总结里说明。
 
+## TikTok 网页解析（tikweb.py，SSSTik + SaveTik 双引擎，免费）
+
+> ⚠️ **2026-08-11 现状**：本服务器直连 www.tiktok.com 连接超时（yt-dlp 报 connect timeout，必失败），**TikTok 链接一律走 tikweb.py**。第三方解析站及其 CDN（tikcdn.io / dl.snapcdn.app）可正常访问。
+
+```powershell
+python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scripts\tikweb.py" "链接或分享文本" $env:TEMP
+# 只要 MP3/音频：末尾追加 audio 参数
+# 要 HD 原画：末尾追加 hd 参数（SaveTik 的 _original.mp4 原画通道；SaveTik 被限流时自动回退普通无水印版）
+```
+
+- **双引擎自动降级**：默认 SSSTik 优先（单 POST `/abc?url=dl` 出 tikcdn.io 无水印直链 + MP3），SaveTik 备选（主页抓 k_token/k_exp → ajaxSearch → JWT 直链）；`hd` 模式顺序反转（只有 SaveTik 有原画通道）
+- **实测耗时**：SSSTik 解析+下载约 1~2 分钟（CDN 速度一般），audio 模式约 7 秒
+- 输出与其他脚本对齐：`Text:`/`Author:`/`VIDEO:`/`AUDIO:`/`IMG_n:`；图文帖无视频时自动回退下载图片
+- 支持短链（vm./vt./tiktok.com/t/）与整段分享文本，脚本内部自动提取 URL
+- 拿到路径后按「抖音兜底」小节的 4 步后处理流程执行（长路径规范化 → send_message_to_user 发组件 → 清理）
+
+**★★★ 限流警告（重要）★★**
+- **SaveTik 限流极凶**：短时间内连续调用会先 429 后 403 IP 冷却封禁（2026-08-11 实测约 8 次请求后被封）。**同一轮对话最多解析一次 TikTok**，失败了就按错误处理告知用户，不要反复重试
+- SSSTik 相对宽松，但也别刷屏
+- 抖音链接走本脚本只是机会性尝试（SaveTik 抖音后端当前 326 损坏，SSSTik 不支持抖音）
+
+## DouSnap 解析（dousnap.py，免费，抖音/B站利器）
+
+> ⚠️ **2026-08-11 现状**：DouSnap.com 的 AES 协议已完整逆向（请求/响应全部 AES-128-CBC 加密，密钥固定）。**需要登录 token**（匿名拿不到异步结果），token 已存于 `scripts\dousnap_token.txt`（JWT 无过期声明，账号登出前长期有效；失效时找用户重新登录网站后在 Console 执行 `localStorage.getItem("auth_token")` 获取并更新文件）。
+> 实测：抖音视频帖（1.8MB mp4 直链+文案）、抖音图文帖（自动回退下载 4 张图）、抖音 BGM（mp3）、B站（同步直出视频+MP3+字幕）全部通过。text 模式（口播转写）2026-08-11 深夜实测通过。
+
+```powershell
+python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scripts\dousnap.py" "链接或分享文本" $env:TEMP
+# 只要 MP3/BGM：末尾追加 audio 参数
+# 要文案+口播转写：末尾追加 text 参数（不下载文件，输出 Text:/TRANSCRIPT:/SOURCE:）
+```
+
+- **流程**：POST doTask 创建任务 → 缓存命中时同步返回直链，否则轮询历史任务接口等结果（脚本内部完成，媒体最长 45 秒、转写最长 90 秒）
+- **text 模式（文案/口播提取）**：语音转文字随解析任务附赠，无需额外接口。实测 77 秒口播视频约 13 秒出完整转写；同一链接重复解析秒回（服务端缓存）。纯音乐/静音视频转写为空时只输出文案行。B站外语视频会同时给中文翻译（TRANSCRIPT）和原文（SOURCE）。**适用场景**：用户发链接说"这个视频讲了什么/提取文案/转成文字/总结一下口播内容"——先跑 text 模式拿转写，再用转写内容直接回答或总结，**不必先下载视频**
+- ⚠ **失败状态是 `FAILURE`**（不是 FAILED），且 `errorMessage` 字段成功时也会塞"视频处理成功!"，判定只看 status；脚本已内置，失败（如作品被平台风控审核）会带平台原话提前退出，不会傻等超时
+- ⚠ 官方 queryTask 接口对抖音恒报"服务拥挤"（匿名/登录都一样，后端问题），脚本改走 userHistoryTasks 接口轮询，**不要自己去调 queryTask**
+- 输出与其他脚本对齐：`Text:`/`VIDEO:`/`AUDIO:`/`IMG_n:`；图文帖无视频时自动回退下载图片
+- ⚠ **接口不返回作者昵称**（title 恒为"暂无标题"）——结尾总结只有文案可用，博主名跳过或用"这位博主"带过
+- 支持短链（v.douyin.com）与整段分享文本；图文帖图片是 douyinpic 签名 webp（带时效，拿到即下载，脚本已处理）
+- **限流警告**：解析额度未知，**同一轮对话最多解析一次**，失败就降级下一环，别重试
+- 抖音系 CDN（365yg/douyinpic）拒绝第三方 Referer，脚本已用裸 UA 下载，不要改动
+- 拿到路径后按「抖音兜底」小节的 4 步后处理流程执行（长路径规范化 → send_message_to_user 发组件 → 清理）
+
 ## 音频 / BGM 提取
 
 用户说"提取音频/BGM/音乐/原声"时：
 
 - **抖音/快手图文帖**：跑对应兜底脚本时**末尾追加 `audio` 参数**，脚本额外输出 `AUDIO:<path>`（抖音是 mp3，快手图集是 m4a）
+- **dousnap.py 也支持 audio 模式**：抖音视频帖/图文帖的 BGM 都能拿（R2 托管的 mp3），hellotik 限速时可作为音频兜底
 - **视频帖要纯音频**：先按正常流程下载视频，再用 ffmpeg 抽音轨：
   ```powershell
   & "C:\ffmpeg\bin\ffmpeg.exe" -i "$env:TEMP\dl_media_video.mp4" -vn -c:a libmp3lame -q:a 2 "$env:TEMP\dl_media_audio.mp3" -y 2>&1 | Out-String
@@ -271,6 +324,9 @@ python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scri
 - 每次成功调用消耗 1 credit，调用前无需请示但要在总结里说明消耗；失败（api error）不扣费
 - 视频直链带时效签名，**拿到后立即在同一轮下载**，不要缓存 URL
 - 集成策略调整（2026-08-05）：新增 hellotik.py 免费兜底；**动图/live 视频优先走 Hellotik（免费、10分钟限速），Hellotik 限速时降级 SnapAny（付费）**；图片/BGM 仍用本地脚本
+- 集成策略调整（2026-08-11）：新增 tikweb.py（SSSTik+SaveTik 双引擎，免费，实测 video/audio/hd 三模式可用）；**TikTok 一律走 tikweb**（实测服务器直连 www.tiktok.com 超时，yt-dlp 对 TikTok 作废）；抖音链改为 hellotik → tikweb（机会性）→ snapany，douyin_note/yt-dlp 移出抖音主链
+- 集成策略调整（2026-08-11 晚）：新增 dousnap.py（DouSnap.com 引擎，AES 协议已逆向，免费，登录 token 存于 scripts/dousnap_token.txt）；实测抖音视频/图文/BGM、B站全通；**抖音兜底链更新为 hellotik → dousnap → tikweb（机会性）→ snapany**；B站 412 风控新增 dousnap 兜底；小红书/快手失败时机会性尝试 dousnap（官方宣称支持，未验证）
+- 集成策略调整（2026-08-11 深夜）：dousnap.py 新增 text 模式（文案+口播 ASR 转写，随解析任务免费附赠，无需额外接口，实测 77 秒视频约 13 秒出完整转写）；用户要"视频讲了什么/提取文案"时优先用它，不必下载视频；另确认平台失败状态为 FAILURE 且 errorMessage 不可作为失败判据
 
 **拿不到就放弃，告诉用户"这个暂时下载不了"，不要继续尝试。**
 
