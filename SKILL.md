@@ -100,6 +100,16 @@ webp 动图同理，把输入换成 `$env:TEMP\dl_media.webp`。转完后发送 
 Get-ChildItem "$env:TEMP\dl_media*" | Select-Object -ExpandProperty FullName
 ```
 
+**发送前视频体检（必做）**：`.mp4` **超过 23MB 必须先重编码**——微信视频消息硬上限 25MB，超了直接发送失败；解析站返回的常是作者原片，码率高、容易贴线（2026-08-11 实测：抖音 67 秒视频 1440×1080 原片 24.3MB + HE-AACv2 音频 → 发送失败；重编码到 21MB Main+AAC-LC 后成功）：
+
+```powershell
+& "C:\ffmpeg\bin\ffmpeg.exe" -i "$env:TEMP\dl_media_video.mp4" -c:v libx264 -profile:v main -preset veryfast -b:v 2500k -maxrate 2500k -bufsize 5000k -c:a aac -ar 44100 -b:a 128k -movflags +faststart "$env:TEMP\dl_media_video_wx.mp4" -y 2>&1 | Out-String
+```
+
+- 转完发送 `_wx.mp4`；**音频是 HE-AACv2 的无论如何都要转成 AAC-LC**（微信对冷门音频编码不友好），`ffmpeg -i` 输出里能看到编码信息
+- 转完仍超 23MB（长视频）：按 `目标MB×8÷秒数×1024 = 总kbps` 估算后调低 `-b:v`（音频留 128k），重转一次
+- ≤23MB 且编码常规（H.264 + AAC-LC）的视频不用转，直接发
+
 用 `send_message_to_user` 发送，每个文件一个组件，**按扩展名选类型**：
 - 图片（`.jpeg`/`.jpg`/`.png`/`.gif`）→ `{"type": "image", "path": "完整绝对长路径"}`（微信才会直接显示图片）
 - 视频（`.mp4`）→ `{"type": "video", "path": "完整绝对长路径"}`（微信才会显示成可播放的视频；**禁止用 `file`**，否则微信只显示成文件附件）
@@ -274,6 +284,7 @@ python "C:\Users\Administrator\Desktop\Astrbot\data\skills\video-downloader\scri
 - 输出与其他脚本对齐：`Text:`/`VIDEO:`/`AUDIO:`/`IMG_n:`；图文帖无视频时自动回退下载图片
 - ⚠ **接口不返回作者昵称**（title 恒为"暂无标题"）——结尾总结只有文案可用，博主名跳过或用"这位博主"带过
 - 支持短链（v.douyin.com）与整段分享文本；图文帖图片是 douyinpic 签名 webp（带时效，拿到即下载，脚本已处理）
+- **分辨率说明**：接口只给一条直链（videoUrlList 通常同一条），返回的是**作者上传的原片画质**，无高清/标清档位可选；实测有 4:3 1440×1080 原片（67 秒 24.3MB），文件可能很大，发送前务必走「发送前视频体检」
 - **限流警告**：解析额度未知，**同一轮对话最多解析一次**，失败就降级下一环，别重试
 - 抖音系 CDN（365yg/douyinpic）拒绝第三方 Referer，脚本已用裸 UA 下载，不要改动
 - 拿到路径后按「抖音兜底」小节的 4 步后处理流程执行（长路径规范化 → send_message_to_user 发组件 → 清理）
